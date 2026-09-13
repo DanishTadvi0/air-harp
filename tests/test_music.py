@@ -27,9 +27,29 @@ def test_a440_is_a440():
 
 
 def test_c_major_gives_the_chords_you_would_expect(key):
-    assert key.names == ["C", "Dm", "Em", "F", "G", "Am", "Bm"]
+    assert key.names == ["C", "Dm", "Em", "F", "G", "Am", "Bdim"]
     assert key.roman(0) == "I"
     assert key.roman(4) == "V"
+
+
+def test_the_seventh_degree_is_diminished_not_minor(key):
+    """B-D-F has a minor third and a flat fifth. Reading the third alone and
+    calling it B minor is the classic way to get this wrong."""
+    assert key.quality == ["maj", "min", "min", "maj", "maj", "min", "dim"]
+    assert key.names[6] == "Bdim"
+    assert key.label(6, 4) == "Bdim7"
+
+
+def test_a_diminished_degree_is_never_labelled_a_power_chord(key):
+    """A '5' chord is a perfect fifth. On the diminished degree that interval
+    is a tritone, so the label would be a lie."""
+    assert key.label(0, 2) == "C5"
+    assert key.label(6, 2) == "Bdim"
+
+
+def test_minor_key_qualities_are_right():
+    k = Key(root=45, scale="minor")
+    assert k.names == ["Am", "Bdim", "C", "Dm", "Em", "F", "G"]
 
 
 def test_a_minor_gives_the_minor_chords():

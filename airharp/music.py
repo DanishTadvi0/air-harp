@@ -64,6 +64,7 @@ class Key:
         self.parent = MAJOR if self.scale == "major" else MINOR
         self.roots = np.array([self._pitch(d) for d in range(DEGREES)],
                               dtype=np.float64)
+        self.quality = [self._quality(d) for d in range(DEGREES)]
         self.names = [self._chord_name(d) for d in range(DEGREES)]
         self.root_names = [note_name(m) for m in self.roots]
 
@@ -72,10 +73,19 @@ class Key:
         n = len(self.parent)
         return self.root + self.parent[degree % n] + 12 * (degree // n)
 
+    def _quality(self, degree):
+        """Naming a chord from its third alone calls B-D-F a B minor. It is
+        diminished -- the fifth is what tells them apart."""
+        root = self._pitch(degree)
+        third = self._pitch(degree + 2) - root
+        fifth = self._pitch(degree + 4) - root
+        if third >= 4:
+            return "maj" if fifth == 7 else "aug"
+        return "min" if fifth == 7 else "dim"
+
     def _chord_name(self, degree):
         root = note_name(self._pitch(degree))[:-1]
-        third = self._pitch(degree + 2) - self._pitch(degree)
-        return f"{root}{'' if third >= 4 else 'm'}"
+        return root + {"maj": "", "min": "m", "dim": "dim", "aug": "aug"}[self.quality[degree]]
 
     def roman(self, degree):
         return ROMAN[self.scale][int(degree) % DEGREES]
@@ -114,7 +124,11 @@ class Key:
         if kind in ("muted", "single"):
             return self.root_names[degree]
         if kind == "fifth":
-            return base.rstrip("m") + "5"
+            # A "5" chord means root plus a perfect fifth. On a diminished
+            # degree that interval is a tritone, so the name would be a lie.
+            if self.quality[degree] in ("maj", "min"):
+                return base.rstrip("m") + "5"
+            return base
         if kind == "seventh":
             return base + "7"
         return base

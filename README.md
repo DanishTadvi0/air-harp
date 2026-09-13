@@ -4,6 +4,9 @@ A musical instrument you play with your hands in front of a webcam. The fingers
 you raise are the chord. Nothing is worn, nothing is clicked, and there is
 nothing to read before you start.
 
+**[Play it in your browser](https://danishtadvi0.github.io/air-harp/)** — no install, nothing to download.
+Or run the desktop version:
+
 ```bash
 python run.py
 ```
@@ -35,6 +38,28 @@ which is what lets the thing be played rather than learned.
 Three of the six instruments ring out on their own (harp, guitar, kalimba) and
 three hold for as long as you hold the shape (piano, violin, bells). The screen
 says which.
+
+---
+
+## Two builds
+
+The instrument exists twice, from one design.
+
+**`docs/`** is the browser version: MediaPipe's WASM build for the landmarks,
+Canvas for the drawing, and an AudioWorklet for the synthesis. No build step, no
+bundler, no npm — three files served straight off GitHub Pages. The camera never
+leaves the tab; there is no server and nothing is uploaded.
+
+**`airharp/`** is the Python version. It is the one with the test suite, the
+threading, and the measurements, and it is where the design was worked out.
+
+The parts that do not depend on the platform — the One Euro filter, the
+canonical hand frame, the finger counting, the chord theory, the hold-time
+stabilisation — are the same code translated. Only the camera, the drawing and
+the audio output differ, because only those are platform-bound.
+
+Open [the demo](https://danishtadvi0.github.io/air-harp/#demo) with `#demo` on
+the end and it plays itself with a synthetic hand, no camera needed.
 
 ---
 
@@ -173,11 +198,16 @@ airharp/
   app.py        the frame loop
   calibrate.py  loudness matching and render benchmarks
   selftest.py   camera / model / audio diagnostics
-tests/          151 tests
+docs/
+  index.html    the browser build, served by GitHub Pages
+  app.js        camera, tracking, chords, canvas HUD
+  synth.js      the synthesis engine as an AudioWorklet
+tests/          154 tests
 ```
 
-2,000 lines across the six modules that make up the instrument, 350 more for
-the two diagnostic tools, and 1,350 of tests.
+2,000 lines across the six Python modules that make up the instrument, 350 more
+for the two diagnostic tools, 1,350 of tests, and 1,100 of JavaScript for the
+browser build.
 
 ## Tests
 
@@ -185,7 +215,7 @@ the two diagnostic tools, and 1,350 of tests.
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-151 tests, no camera and no audio device needed — hands are synthesised as
+154 tests, no camera and no audio device needed — hands are synthesised as
 21-landmark skeletons with real finger curl, and the whole frame loop is driven
 through a `step()` that takes a frame and returns a canvas.
 
@@ -197,10 +227,13 @@ a held note, that the guide drawn on screen always agrees with the classifier,
 and that every instrument stays finite and in range with both hands playing
 flat out.
 
-Two real bugs came out of them: the One Euro filter was being fed pixels while
-tuned for normalised units, so it was barely filtering at all; and `release_all`
-read engine state from the control thread while that state is only written by
-the audio thread, which let a queued chord survive the release and hang.
+Three real bugs came out of them. The One Euro filter was being fed pixels
+while tuned for normalised units, so it was barely filtering at all.
+`release_all` read engine state from the control thread while that state is
+only written by the audio thread, which let a queued chord survive the release
+and hang. And the seventh degree was being named from its third alone, which
+called B-D-F a B minor when it is diminished — caught by eye in the browser
+build, then pinned down with a test in both.
 
 ## Known limits
 
@@ -211,6 +244,11 @@ the audio thread, which let a queued chord survive the release and hang.
   responsiveness.
 - The thumb is the least reliable of the five, so the two chords that need it
   are the two hardest to hit cleanly.
+- The finger thresholds were fitted to one synthetic hand and have not been
+  validated against a range of real ones. A hand that cannot extend past about
+  55% of its range will not be read, and nothing on screen explains why.
+- The browser build has only been checked on desktop Chrome. The layout assumes
+  a landscape window.
 
 ## Licence
 
