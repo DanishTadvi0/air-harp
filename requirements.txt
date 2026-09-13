@@ -1,0 +1,4 @@
+numpy>=1.26
+opencv-python>=4.8
+mediapipe>=0.10
+sounddevice>=0.4.6
