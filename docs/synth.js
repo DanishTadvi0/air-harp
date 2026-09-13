@@ -264,10 +264,13 @@ const INSTRUMENTS = [
     make: (f, a, b, d) => new Plucked(f, a, 0.55 + 0.45 * b, (1.1 + 2.1 * d) * tilt(f, 0.3), 0) },
   { name: "Guitar", gain: 1.21, sustains: false,
     make: (f, a, b, d) => new Plucked(f, a, 0.3 + 0.45 * b, (0.7 + 1.5 * d) * tilt(f, 0.35), 0.14) },
-  { name: "Piano", gain: 0.3, sustains: true,
+  // Sustain sits high and the decay toward it is slow, so a chord keeps its
+  // body for a second or two instead of thinning out straight after the hit;
+  // the long release lets one chord ring on under the next.
+  { name: "Piano", gain: 0.19, sustains: true,
     make: (f, a, b, d) => {
-      const [n, g, t] = harmonics(8, 1.15 - 0.35 * b, 1.7 + 2.4 * d, 0.72);
-      return new Additive(f, a, n, g, t.map((x) => x * tilt(f, 0.22)), 0.003, 0.00028, 0.36, 0.5);
+      const [n, g, t] = harmonics(8, 1.15 - 0.35 * b, 2.6 + 3.0 * d, 0.72);
+      return new Additive(f, a, n, g, t.map((x) => x * tilt(f, 0.22)), 0.004, 0.00028, 0.55, 1.4);
     } },
   { name: "Violin", gain: 0.24, sustains: true,
     make: (f, a, b) => new Bowed(f, a, 0.25 + 0.75 * b) },

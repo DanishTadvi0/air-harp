@@ -379,12 +379,14 @@ def _guitar(freq, amp, bright, damp, delay):
 
 
 def _piano(freq, amp, bright, damp, delay):
-    # Struck, then held at a fraction of the strike: a piano with the pedal
-    # down, which is what a held pose should sound like.
-    n, g, t60 = _harmonics(8, 1.15 - 0.35 * bright, 1.7 + 2.4 * damp, 0.72)
+    # Struck, then held near the strike: a piano with the pedal down. The
+    # sustain sits high and the decay toward it is slow, so a chord keeps its
+    # body for a second or two instead of thinning out straight after the hit,
+    # and the long release lets one chord ring on under the next.
+    n, g, t60 = _harmonics(8, 1.15 - 0.35 * bright, 2.6 + 3.0 * damp, 0.72)
     g = g * np.exp(-n * 0.045)
-    return Additive(freq, amp, n, g, t60 * _tilt(freq, 0.22), 0.003,
-                    inharm=0.00028, delay=delay, sustain=0.36, release=0.5)
+    return Additive(freq, amp, n, g, t60 * _tilt(freq, 0.22), 0.004,
+                    inharm=0.00028, delay=delay, sustain=0.55, release=1.4)
 
 
 def _violin(freq, amp, bright, damp, delay):
@@ -413,7 +415,7 @@ def _bell(freq, amp, bright, damp, delay):
 INSTRUMENTS = [                 # colours are BGR, the order OpenCV draws in
     Instrument("Harp",    (130, 205, 245), _harp,    1.46),                  # gold
     Instrument("Guitar",  (80, 140, 230), _guitar,  1.21),                   # copper
-    Instrument("Piano",   (250, 235, 225), _piano,   0.30, sustains=True),   # cool white
+    Instrument("Piano",   (250, 235, 225), _piano,   0.19, sustains=True),   # cool white
     Instrument("Violin",  (250, 150, 150), _violin,  0.24, sustains=True),   # periwinkle
     Instrument("Kalimba", (190, 240, 150), _kalimba, 0.49),                  # mint
     Instrument("Bells",   (225, 170, 245), _bell,    0.21, sustains=True),   # violet
