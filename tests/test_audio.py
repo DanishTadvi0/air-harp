@@ -423,3 +423,59 @@ def test_a_held_chord_is_the_last_voice_to_be_stolen():
     render(eng, 0.1)
     assert len(eng.voices) <= MAX_VOICES
     assert held == 6
+
+
+# -- following the hand -----------------------------------------------------
+
+@pytest.mark.parametrize("index,inst", HOLDERS)
+def test_following_the_hand_at_one_height_does_not_move_the_level(index, inst):
+    """The frame loop calls `set_level` every frame, whether or not the hand
+    has moved. If that does not land on exactly the amplitude `set_chord`
+    would have used, a held chord lurches the instant you stop changing it --
+    and every test that only compares loud against quiet still passes, because
+    both ends are wrong by the same factor.
+    """
+    def run(follow):
+        eng = Engine(silent=True, reverb=False)
+        eng.set_instrument(index)
+        eng.set_chord("h", CHORD, 0.7, 0.6, 0.6)
+        render(eng, 0.4)
+        if follow:
+            for _ in range(30):                 # a second of frames at 30 fps
+                eng.set_level("h", 0.7, 0.6)    # same height as the chord
+                eng.render_block()
+        buf = render(eng, 1.5)
+        return float(np.sqrt((buf[-SR // 4:] ** 2).mean()))
+
+    alone, followed = run(False), run(True)
+    ratio = followed / max(alone, 1e-9)
+    assert 0.82 < ratio < 1.22, (
+        f"{inst.name}: following the hand changed the level by "
+        f"{20 * np.log10(max(ratio, 1e-9)):+.1f} dB")
+
+
+@pytest.mark.parametrize("index,inst", HOLDERS)
+def test_set_level_reaches_the_same_amplitude_as_set_chord(index, inst):
+    """Both paths must agree about the instrument's own gain and about how a
+    chord's loudness is shared between its notes."""
+    eng = Engine(silent=True)
+    eng.set_instrument(index)
+    eng.set_chord("h", CHORD, 0.55, 0.6, 0.6)
+    eng.render_block()
+    started = [v.gain_target for v in eng.groups["h"].values()]
+
+    eng.set_level("h", 0.55, 0.6)
+    eng.render_block()
+    followed = [v.gain_target for v in eng.groups["h"].values()]
+
+    assert started == pytest.approx(followed, rel=1e-6), inst.name
+
+
+def test_a_quiet_note_is_quiet_because_of_its_gain_not_its_partials():
+    """Amplitude lives in one place. If it were baked into the partials as
+    well, retargeting would apply it twice."""
+    loud = Additive(220.0, 1.0, [1.0, 2.0], [1.0, 0.5], [2.0, 1.0], 0.002, sustain=0.5)
+    quiet = Additive(220.0, 0.1, [1.0, 2.0], [1.0, 0.5], [2.0, 1.0], 0.002, sustain=0.5)
+    assert loud.g == pytest.approx(quiet.g), "partials must not carry amplitude"
+    assert quiet.gain == pytest.approx(0.1)
+    assert loud.gain == pytest.approx(1.0)

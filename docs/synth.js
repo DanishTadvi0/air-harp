@@ -144,7 +144,9 @@ class Plucked extends Voice {
 /** Summed partials with per-partial decay: piano, kalimba, bells. */
 class Additive extends Voice {
   constructor(freq, amp, ratios, gains, t60s, attack, inharm = 0, sustain = 0, release = 0.4) {
-    super(1);
+    // Amplitude belongs to the voice gain, never to the partials. Scaling the
+    // partials too would apply it twice the moment anything retargets.
+    super(amp);
     const inc = [], g = [], dec = [], rest = [], phase = [];
     for (let i = 0; i < ratios.length; i++) {
       let r = ratios[i];
@@ -153,12 +155,12 @@ class Additive extends Voice {
       if (f >= sampleRate * 0.46) continue;
       inc.push(f / sampleRate);
       phase.push(Math.random());
-      const g0 = gains[i] * amp;
+      const g0 = gains[i];
       g.push(g0);
       rest.push(g0 * sustain);
       dec.push(Math.pow(10, -3 / (Math.max(t60s[i], 0.02) * sampleRate)));
     }
-    if (!inc.length) { inc.push(freq / sampleRate); phase.push(0); g.push(amp); rest.push(0); dec.push(0.9999); }
+    if (!inc.length) { inc.push(freq / sampleRate); phase.push(0); g.push(1); rest.push(0); dec.push(0.9999); }
     this.inc = Float64Array.from(inc);
     this.phase = Float64Array.from(phase);
     this.g = Float32Array.from(g);
@@ -169,7 +171,7 @@ class Additive extends Voice {
     this.sustains = sustain > 0;
     this.relLen = Math.max(1, Math.floor(release * sampleRate));
     this.rel = -1;
-    this.floor = amp * 0.0008 + 1e-5;
+    this.floor = 8e-4;          // on the partial envelope, which is unit-scale
   }
 
   get held() { return this.sustains && this.rel < 0; }

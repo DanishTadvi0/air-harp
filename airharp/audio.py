@@ -208,7 +208,9 @@ class Additive(Voice):
 
     def __init__(self, freq, amp, ratios, gains, taus, attack, inharm=0.0,
                  delay=0, sustain=0.0, release=0.4):
-        super().__init__(delay, gain=1.0)
+        # Amplitude belongs to the voice gain, never to the partials. Scaling
+        # the partials too would apply it twice the moment anything retargets.
+        super().__init__(delay, gain=amp)
         r = np.asarray(ratios, dtype=np.float64)
         if inharm:
             r = r * np.sqrt(1.0 + inharm * r * r)
@@ -219,13 +221,13 @@ class Additive(Voice):
             keep[0] = True
         self.inc = (f[keep] / SR).astype(np.float64)
         self.phase = _rng.random(int(keep.sum())).astype(np.float64)
-        self.g = (np.asarray(gains, dtype=np.float32)[keep] * amp).astype(np.float32)
+        self.g = np.asarray(gains, dtype=np.float32)[keep].copy()
         # `taus` are -60 dB times in seconds, which is how the ear hears decay.
         t60 = np.maximum(np.asarray(taus, dtype=np.float64)[keep], 0.02)
         self.dec = np.power(10.0, -3.0 / (t60 * SR)).astype(np.float32)
         self.att = max(1, int(attack * SR))
         self.t = 0
-        self.floor = amp * 0.0008 + 1e-5
+        self.floor = 8e-4          # on the partial envelope, which is unit-scale
         self.rest = (self.g * float(sustain)).astype(np.float32)
         self.sustains = sustain > 0.0
         self.rel_len = max(1, int(release * SR))
@@ -570,8 +572,15 @@ class Engine:
             return
 
         if kind == "level":
-            for voice in self.groups.get(key, {}).values():
-                voice.retarget(gain=amp, bright=bright)
+            group = self.groups.get(key)
+            if not group:
+                return
+            # Must arrive at exactly the amplitude `set_chord` would have used,
+            # or simply following the hand jumps the level.
+            inst = INSTRUMENTS[self.instrument]
+            each = self._spread(amp, len(group)) * inst.gain
+            for voice in group.values():
+                voice.retarget(gain=each, bright=bright)
             return
 
         if kind == "strike":
