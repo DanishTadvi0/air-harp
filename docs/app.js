@@ -302,6 +302,7 @@ const INSTRUMENTS = [
   { name: "Violin", rgb: [150, 150, 250], sustains: true },
   { name: "Kalimba", rgb: [150, 240, 190], sustains: false },
   { name: "Bells", rgb: [245, 170, 225], sustains: true },
+  { name: "Synth", rgb: [130, 200, 255], sustains: true },
 ];
 const BONES = [
   [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[9,10],[10,11],[11,12],
@@ -764,7 +765,7 @@ function frame(nowMs) {
 addEventListener("keydown", (e) => {
   if (!running) return;
   const k = e.key;
-  if (k >= "1" && k <= "6") { instrument = +k - 1; send({ type: "instrument", index: instrument }); reader.reset(); }
+  if (k >= "1" && k <= "7") { instrument = +k - 1; send({ type: "instrument", index: instrument }); reader.reset(); }
   else if (k === "m") { key.toggleScale(); retune(); }
   else if (k === "[") { key.transpose(-1); retune(); }
   else if (k === "]") { key.transpose(1); retune(); }

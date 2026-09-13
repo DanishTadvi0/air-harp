@@ -57,7 +57,7 @@ def test_every_instrument_eventually_frees_its_voices(index, inst, engine):
 def test_the_required_three_are_all_here():
     names = [i.name for i in INSTRUMENTS]
     assert {"Piano", "Violin", "Guitar"} <= set(names)
-    assert len(names) == len(set(names)) == 6
+    assert len(names) == len(set(names)) == 7
 
 
 def test_both_kinds_of_instrument_exist():
@@ -479,3 +479,35 @@ def test_a_quiet_note_is_quiet_because_of_its_gain_not_its_partials():
     assert loud.g == pytest.approx(quiet.g), "partials must not carry amplitude"
     assert quiet.gain == pytest.approx(0.1)
     assert loud.gain == pytest.approx(1.0)
+
+
+def test_the_synth_does_not_decay_at_all():
+    """Every other instrument models something struck or bowed and dies away.
+    The synth is the one where not dying is the point: hold the shape and the
+    chord must be as loud eight seconds later as it was at the start."""
+    index = [i for i, x in enumerate(INSTRUMENTS) if x.name == "Synth"][0]
+    eng = Engine(silent=True, reverb=False)
+    eng.set_instrument(index)
+    eng.set_chord("h", CHORD, 0.7, 0.6, 0.6)
+
+    levels, done = [], 0.0
+    for mark in (0.5, 8.0):
+        eng.render_block()
+        buf = render(eng, mark - done)
+        done = mark
+        levels.append(float(np.sqrt((buf[-SR // 4:] ** 2).mean())))
+
+    fall = 20 * np.log10(max(levels[1], 1e-9) / max(levels[0], 1e-9))
+    assert abs(fall) < 2.0, f"drifted {fall:+.1f} dB over eight seconds"
+
+
+def test_the_piano_still_decays_because_it_is_a_piano():
+    """The counterpart: adding a pad must not have flattened everything else."""
+    index = [i for i, x in enumerate(INSTRUMENTS) if x.name == "Piano"][0]
+    eng = Engine(silent=True, reverb=False)
+    eng.set_instrument(index)
+    eng.set_chord("h", CHORD, 0.7, 0.6, 0.6)
+    early = float(np.sqrt((render(eng, 0.5)[-SR // 4:] ** 2).mean()))
+    late = float(np.sqrt((render(eng, 7.5)[-SR // 4:] ** 2).mean()))
+    assert late < early * 0.85, "a piano chord should settle below its strike"
+    assert late > early * 0.3, "but it should not vanish either"

@@ -28,16 +28,23 @@ All seven shapes are drawn along the foot of the screen the whole time you play.
 | right hand, 1–5 fingers | how full the chord is: one note, a fifth, a triad, a seventh, an open voicing |
 | raise / lower a hand | louder and brighter / quieter and warmer |
 | close to a fist | stop |
-| `1`–`6` | harp, guitar, piano, violin, kalimba, bells |
+| `1`–`7` | harp, guitar, piano, violin, kalimba, bells, synth |
 | `[` `]` | change key · `m` major/minor · `d` stats · `q` quit |
 
 Every chord is built by stacking thirds inside the key, so no combination of
 fingers can produce a note that does not belong. There is no wrong note to hit,
 which is what lets the thing be played rather than learned.
 
-Three of the six instruments ring out on their own (harp, guitar, kalimba) and
-three hold for as long as you hold the shape (piano, violin, bells). The screen
-says which.
+Three of the seven instruments ring out on their own (harp, guitar, kalimba)
+and four hold for as long as you hold the shape (piano, violin, bells, synth).
+The screen says which.
+
+The synth is the odd one out: it has no decay whatsoever, so a chord stays
+exactly as loud as you left it until you change shape or drop your hand.
+Everything else here models something struck or bowed and therefore dies away
+— this is the one where not dying is the point. Two oscillators sit a few
+cents apart and beat slowly against each other, which is all that separates a
+warm pad from a test tone.
 
 ---
 
@@ -140,7 +147,7 @@ instrument, late input is worse than missing input.
 
 ### Making the sound
 
-Six instruments, all synthesised — no samples.
+Seven instruments, all synthesised — no samples.
 
 - **Harp and guitar** are Karplus–Strong. The loop filter reads only taps
   written a full lap earlier, so a block can be processed in chunks no longer
@@ -154,6 +161,8 @@ Six instruments, all synthesised — no samples.
   costs nothing at render time. A naive saw at 1.5 kHz folds its upper
   harmonics back into the audible range; a test asserts the energy below the
   fundamental stays under −30 dB.
+- **Synth** is the same band-limited table held flat, with a second detuned
+  oscillator for warmth and no decay at all.
 - **Reverb** is Schroeder — four combs and two allpasses, vectorised the same
   way as the string.
 
@@ -202,7 +211,7 @@ docs/
   index.html    the browser build, served by GitHub Pages
   app.js        camera, tracking, chords, canvas HUD
   synth.js      the synthesis engine as an AudioWorklet
-tests/          154 tests
+tests/          170 tests
 ```
 
 2,000 lines across the six Python modules that make up the instrument, 350 more
@@ -215,7 +224,7 @@ browser build.
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-154 tests, no camera and no audio device needed — hands are synthesised as
+170 tests, no camera and no audio device needed — hands are synthesised as
 21-landmark skeletons with real finger curl, and the whole frame loop is driven
 through a `step()` that takes a frame and returns a canvas.
 
@@ -227,13 +236,29 @@ a held note, that the guide drawn on screen always agrees with the classifier,
 and that every instrument stays finite and in range with both hands playing
 flat out.
 
-Three real bugs came out of them. The One Euro filter was being fed pixels
+Five real bugs came out of them. The One Euro filter was being fed pixels
 while tuned for normalised units, so it was barely filtering at all.
 `release_all` read engine state from the control thread while that state is
 only written by the audio thread, which let a queued chord survive the release
 and hang. And the seventh degree was being named from its third alone, which
 called B-D-F a B minor when it is diminished — caught by eye in the browser
 build, then pinned down with a test in both.
+
+The last two were the worst, because they lived in the code path the frame
+loop runs every frame and the tests sailed straight past them. `set_level` --
+which follows your hand height -- passed the raw height through as a voice
+gain without the instrument's own gain or the chord-size division, so it
+landed nowhere near the amplitude `set_chord` had just used: violin jumped
+17 dB, bells lost 4.5. And the additive voice carried amplitude twice, baked
+into its partials *and* applied again by the gain ramp, so the first
+`set_level` after a chord started scaled it by the amplitude a second time
+and the piano lost 3 dB the instant you stopped moving.
+
+The tests missed both for the same reason: they compared a loud hand against
+a quiet one, and that ratio stays correct when both ends are wrong by the
+same factor. The replacements check absolute level -- that following the hand
+at an unchanged height does not move the level at all. Reintroducing either
+bug now fails seven tests.
 
 ## Known limits
 

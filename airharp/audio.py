@@ -284,16 +284,26 @@ class Bowed(Voice):
     ATTACK = 0.10          # seconds for the bow to bite
     RELEASE = 0.34         # seconds for it to lift
 
-    def __init__(self, freq, amp, bright, damp, delay=0):
+    def __init__(self, freq, amp, bright, damp, delay=0, attack=None,
+                 release=None, vib_depth=None, vib_hz=None, detune=0.0):
         super().__init__(delay, gain=amp)
         lvl = int(np.clip(round(bright * (_BRIGHTS - 1)), 0, _BRIGHTS - 1))
         self.tab = _SAW[lvl][_band_of(freq)]
         self.inc = freq / SR
-        self.phase = 0.0
+        # Two oscillators a few cents apart beat slowly against each other.
+        # That slow drift is the whole of what makes a pad sound warm rather
+        # than like a test tone.
+        self.ratios = ((1.0,) if detune <= 0.0
+                       else (1.0 - detune * 0.5, 1.0 + detune * 0.5))
+        self.phases = [float(_rng.random()) if i else 0.0
+                       for i in range(len(self.ratios))]
+        self.norm = 1.0 / len(self.ratios)
+        self.vib_depth = self.VIB_DEPTH if vib_depth is None else vib_depth
+        self.vib_hz = self.VIB_HZ if vib_hz is None else vib_hz
         self.vph = float(_rng.random())
         self.t = 0
-        self.att = max(1, int(self.ATTACK * SR))
-        self.rel_len = max(1, int(self.RELEASE * SR))
+        self.att = max(1, int((self.ATTACK if attack is None else attack) * SR))
+        self.rel_len = max(1, int((self.RELEASE if release is None else release) * SR))
         self.rel = -1
 
     @property
@@ -311,11 +321,15 @@ class Bowed(Voice):
 
         # Vibrato fades in, the way a player settles into a held note.
         fade = np.clip(abs_t * (1.0 / (0.35 * SR)), 0.0, 1.0)
-        vph = self.vph + (self.VIB_HZ / SR) * t
-        vib = 1.0 + self.VIB_DEPTH * fade * _SINE[(vph * _TN).astype(np.int64) & _TMASK]
+        vph = self.vph + (self.vib_hz / SR) * t
+        vib = 1.0 + self.vib_depth * fade * _SINE[(vph * _TN).astype(np.int64) & _TMASK]
 
-        ph = self.phase + np.cumsum(self.inc * vib)
-        idx = (ph * _TN).astype(np.int64) & _TMASK
+        sig = np.zeros(n, dtype=np.float32)
+        for k, ratio in enumerate(self.ratios):
+            ph = self.phases[k] + np.cumsum(self.inc * ratio * vib)
+            sig += self.tab[(ph * _TN).astype(np.int64) & _TMASK]
+            self.phases[k] = float(ph[-1] % 1.0)
+        sig *= self.norm
 
         env = np.clip(abs_t * (1.0 / self.att), 0.0, 1.0)
         env = env * env * (3.0 - 2.0 * env)          # smoothstep on the attack
@@ -326,9 +340,8 @@ class Bowed(Voice):
             if self.rel >= self.rel_len:
                 self.done = True
 
-        out[start:] += self.tab[idx] * (env * self._ramp(n)).astype(np.float32)
-        self.phase = float(ph[-1] % 1.0)
-        self.vph = float((vph[-1] + self.VIB_HZ / SR) % 1.0)
+        out[start:] += sig * (env * self._ramp(n)).astype(np.float32)
+        self.vph = float((vph[-1] + self.vib_hz / SR) % 1.0)
         self.t += n
 
 
@@ -414,6 +427,18 @@ def _bell(freq, amp, bright, damp, delay):
 # The gains are loudness-matched, not guesses: `python -m airharp.calibrate`
 # renders one note per instrument across three octaves and reports the trim
 # needed to bring each to the same one-second RMS.
+def _synth(freq, amp, bright, damp, delay):
+    """A pad that simply holds: no decay at all, so a chord stays exactly as
+    loud as you left it until you change shape or drop your hand.
+
+    Every other instrument here models something struck or bowed and therefore
+    dies away. This one is the odd case where not dying is the point.
+    """
+    return Bowed(freq, amp, 0.05 + 0.45 * bright, damp, delay,
+                 attack=0.06, release=1.3,
+                 vib_depth=0.0016, vib_hz=4.1, detune=0.004)
+
+
 INSTRUMENTS = [                 # colours are BGR, the order OpenCV draws in
     Instrument("Harp",    (130, 205, 245), _harp,    1.46),                  # gold
     Instrument("Guitar",  (80, 140, 230), _guitar,  1.21),                   # copper
@@ -421,6 +446,7 @@ INSTRUMENTS = [                 # colours are BGR, the order OpenCV draws in
     Instrument("Violin",  (250, 150, 150), _violin,  0.24, sustains=True),   # periwinkle
     Instrument("Kalimba", (190, 240, 150), _kalimba, 0.49),                  # mint
     Instrument("Bells",   (225, 170, 245), _bell,    0.21, sustains=True),   # violet
+    Instrument("Synth",   (255, 200, 130), _synth,   0.18, sustains=True),   # sky
 ]
 
 

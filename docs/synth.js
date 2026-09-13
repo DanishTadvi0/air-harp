@@ -208,16 +208,25 @@ class Additive extends Voice {
 
 /** Band-limited sawtooth under a bow-stroke envelope: violin. */
 class Bowed extends Voice {
-  constructor(freq, amp, bright) {
+  constructor(freq, amp, bright, opts = {}) {
     super(amp);
+    const { attack = 0.1, release = 0.34, vibDepth = 0.0055, vibHz = 5.3,
+            detune = 0 } = opts;
     const lvl = Math.min(BRIGHTS - 1, Math.max(0, Math.round(bright * (BRIGHTS - 1))));
     this.tab = SAW[lvl][bandOf(freq)];
     this.inc = freq / sampleRate;
-    this.phase = 0;
+    // Two oscillators a few cents apart beat slowly against each other. That
+    // slow drift is the whole of what makes a pad sound warm rather than like
+    // a test tone.
+    this.ratios = detune > 0 ? [1 - detune * 0.5, 1 + detune * 0.5] : [1];
+    this.phases = this.ratios.map((_, i) => (i ? Math.random() : 0));
+    this.norm = 1 / this.ratios.length;
+    this.vibDepth = vibDepth;
+    this.vibHz = vibHz;
     this.vph = Math.random();
     this.t = 0;
-    this.att = Math.max(1, Math.floor(0.1 * sampleRate));
-    this.relLen = Math.max(1, Math.floor(0.34 * sampleRate));
+    this.att = Math.max(1, Math.floor(attack * sampleRate));
+    this.relLen = Math.max(1, Math.floor(release * sampleRate));
     this.rel = -1;
   }
 
@@ -226,21 +235,27 @@ class Bowed extends Voice {
 
   render(out, n) {
     const gain = this.stepGain();
-    const vibInc = 5.3 / sampleRate;
-    let ph = this.phase, vph = this.vph, t = this.t, rel = this.rel;
+    const vibInc = this.vibHz / sampleRate;
+    const ph = this.phases.slice();
+    let vph = this.vph, t = this.t, rel = this.rel;
     for (let s = 0; s < n; s++) {
       // Vibrato fades in, the way a player settles into a held note.
       const fade = Math.min(1, t / (0.35 * sampleRate));
-      const vib = 1 + 0.0055 * fade * SINE[((vph * TN) | 0) & TMASK];
+      const vib = 1 + this.vibDepth * fade * SINE[((vph * TN) | 0) & TMASK];
       let e = Math.min(1, t / this.att);
       e = e * e * (3 - 2 * e);                      // smoothstep attack
       if (rel >= 0) { const r = Math.max(0, 1 - rel / this.relLen); e *= r * r; rel++; }
-      out[s] += this.tab[((ph * SAW_N) | 0) & SAW_MASK] * e * gain;
-      ph += this.inc * vib; if (ph >= 1) ph -= 1;
+      let sig = 0;
+      for (let k = 0; k < ph.length; k++) {
+        sig += this.tab[((ph[k] * SAW_N) | 0) & SAW_MASK];
+        ph[k] += this.inc * this.ratios[k] * vib;
+        if (ph[k] >= 1) ph[k] -= 1;
+      }
+      out[s] += sig * this.norm * e * gain;
       vph += vibInc; if (vph >= 1) vph -= 1;
       t++;
     }
-    this.phase = ph; this.vph = vph; this.t = t;
+    this.phases = ph; this.vph = vph; this.t = t;
     if (this.rel >= 0) { this.rel = rel; if (rel >= this.relLen) this.done = true; }
   }
 }
@@ -291,6 +306,12 @@ const INSTRUMENTS = [
         .map((x) => x * (2.4 + 4.6 * d) * tilt(f, 0.18));
       return new Additive(f, a, n, g, t, 0.004, 0, 0.38, 0.9);
     } },
+  // A pad that simply holds: no decay at all, so a chord stays exactly as loud
+  // as you left it. Every other instrument models something struck or bowed
+  // and dies away; this is the one where not dying is the point.
+  { name: "Synth", gain: 0.18, sustains: true,
+    make: (f, a, b) => new Bowed(f, a, 0.05 + 0.45 * b,
+      { attack: 0.06, release: 1.3, vibDepth: 0.0016, vibHz: 4.1, detune: 0.004 }) },
 ];
 
 // ---------------------------------------------------------------------------
