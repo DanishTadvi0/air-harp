@@ -144,7 +144,7 @@ class Plucked extends Voice {
 /** Summed partials with per-partial decay: piano, kalimba, bells. */
 class Additive extends Voice {
   constructor(freq, amp, ratios, gains, t60s, attack, inharm = 0, sustain = 0,
-              release = 0.4, drift = 0, driftHz = 0.17) {
+              release = 0.4, drift = 0, driftHz = 0.17, wow = 0) {
     // Amplitude belongs to the voice gain, never to the partials. Scaling the
     // partials too would apply it twice the moment anything retargets.
     super(amp);
@@ -183,6 +183,12 @@ class Additive extends Voice {
     this.driftHz = driftHz;
     this.dphase = Math.random();
     this.dmul = new Float32Array(this.harm.length).fill(1);
+    // Slow pitch instability in cents. A stack of sine partials at a perfectly
+    // fixed pitch is the definition of a test tone; this is most of what makes
+    // it sound played instead. Two rates that do not divide into each other,
+    // so it wanders rather than cycling.
+    this.wow = wow;
+    this.wph = [Math.random(), Math.random()];
     this.floor = 8e-4;          // on the partial envelope, which is unit-scale
   }
 
@@ -192,6 +198,14 @@ class Additive extends Voice {
   render(out, n) {
     const k = this.inc.length;
     const gain = this.stepGain();
+    let wowMul = 1;
+    if (this.wow) {
+      this.wph[0] = (this.wph[0] + (0.61 * n) / sampleRate) % 1;
+      this.wph[1] = (this.wph[1] + (1.07 * n) / sampleRate) % 1;
+      const cents = this.wow * (0.62 * Math.sin(2 * Math.PI * this.wph[0])
+                              + 0.38 * Math.sin(2 * Math.PI * this.wph[1]));
+      wowMul = Math.pow(2, cents / 1200);
+    }
     if (this.drift) {
       this.dphase = (this.dphase + (this.driftHz * n) / sampleRate) % 1;
       const off = -this.drift * Math.sin(2 * Math.PI * this.dphase);
@@ -199,7 +213,7 @@ class Additive extends Voice {
     }
     for (let p = 0; p < k; p++) {
       const dm = this.drift ? this.dmul[p] : 1;
-      const inc = this.inc[p], dec = this.dec[p], rest = this.rest[p];
+      const inc = this.inc[p] * wowMul, dec = this.dec[p], rest = this.rest[p];
       let ph = this.phase[p], g = this.g[p];
       let t = this.t, rel = this.rel;
       for (let s = 0; s < n; s++) {
@@ -302,7 +316,7 @@ const INSTRUMENTS = [
   // Sustain sits high and the decay toward it is slow, so a chord keeps its
   // body for a second or two instead of thinning out straight after the hit;
   // the long release lets one chord ring on under the next.
-  { name: "Piano", gain: 0.40, sustains: true,
+  { name: "Piano", gain: 0.42, sustains: true,
     make: (f, a, b, d) => {
       const [n, g, t] = harmonics(8, 1.55 - 0.35 * b, 2.6 + 3.0 * d, 0.72);
       return new Additive(f, a, n, g, t.map((x) => x * tilt(f, 0.22)),
@@ -317,7 +331,7 @@ const INSTRUMENTS = [
       const t = [1, 0.55, 0.33, 0.18, 0.11].map((x) => x * (0.6 + 1.1 * d) * tilt(f, 0.25));
       return new Additive(f, a, n, g, t, 0.002);
     } },
-  { name: "Bells", gain: 0.47, sustains: true,
+  { name: "Bells", gain: 0.45, sustains: true,
     make: (f, a, b, d) => {
       const n = [0.5, 1, 1.19, 1.56, 2, 2.51, 2.66, 3.01];
       const g = [0.55, 1, 0.42, 0.34, 0.55, 0.22, 0.18, 0.13].map((x) => x * (0.5 + 0.8 * b));
@@ -325,21 +339,22 @@ const INSTRUMENTS = [
         .map((x) => x * (2.4 + 4.6 * d) * tilt(f, 0.18));
       return new Additive(f, a, n, g, t, 0.004, 0, 0.38, 0.9);
     } },
-  // A soft pad that holds flat. Six partials falling away steeply, which is
-  // why it is gentle rather than buzzy -- a sawtooth carries every harmonic at
-  // 1/n and that brightness is what made the first attempt sound robotic. The
-  // rolloff drifts slowly while the note is held, and the partials are doubled
-  // a few cents apart so the two copies beat against each other.
-  { name: "Synth", gain: 0.33, sustains: true,
+  // A soft pad that holds flat. Harmonic balance, detune and pitch wander are
+  // all measured off a tape-keyboard recording inside one held chord, not
+  // chosen by ear. The curve is not a smooth 1/n**p: the third partial sits
+  // well below the fourth, and that dip is a good part of why it reads as
+  // breathy rather than as a stack of sines.
+  { name: "Synth", gain: 0.25, sustains: true,
     make: (f, a, b) => {
-      const det = 0.004, ratios = [], gains = [], t60 = [];
-      for (const side of [1 - det * 0.5, 1 + det * 0.5])
-        for (let n = 1; n <= 8; n++) {
+      const P = [1.0, 0.54, 0.125, 0.246, 0.11, 0.105, 0.023, 0.033];
+      const half = 0.004 * 0.5, ratios = [], gains = [], t60 = [];
+      for (const side of [1 - half, 1 + half])
+        for (let n = 1; n <= P.length; n++) {
           ratios.push(n * side);
-          gains.push(0.5 * Math.pow(n, -(2.15 - 0.5 * b)));
+          gains.push(0.5 * P[n - 1] * Math.pow(n, 0.45 * b - 0.22));
           t60.push(9);                       // unused: sustain holds it flat
         }
-      return new Additive(f, a, ratios, gains, t60, 0.18, 0, 1.0, 1.3, 0.30, 0.17);
+      return new Additive(f, a, ratios, gains, t60, 0.20, 0, 1.0, 1.3, 0.22, 0.17, 9.5);
     } },
 ];
 

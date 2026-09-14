@@ -171,12 +171,14 @@ Seven instruments, all synthesised — no samples.
   costs nothing at render time. A naive saw at 1.5 kHz folds its upper
   harmonics back into the audible range; a test asserts the energy below the
   fundamental stays under −30 dB.
-- **Synth** is six partials falling away steeply, held flat with no decay. A
-  sawtooth carries every harmonic at 1/n, and that brightness is what made the
-  first attempt sound like a buzzer: 32% of its energy sat above 2 kHz against
-  0.7% now. Its rolloff also drifts slowly while a note is held, which is what
-  a filter opening and closing does, and is most of what the ear hears as alive
-  rather than switched on.
+- **Synth** is eight partials held flat with no decay, and its harmonic
+  balance, detune and pitch wander are measured off a tape-keyboard recording
+  rather than chosen by ear. The curve is not a smooth 1/n**p -- the third
+  partial sits well below the fourth, and that dip is a good part of why it
+  reads as breathy. Measured against the recording: harmonic slope 2.02 against
+  1.95, pitch wander 9.0 cents rms against 9.5. Its rolloff also drifts slowly
+  while a note is held, which is what a filter opening and closing does, and is
+  most of what the ear hears as alive rather than switched on.
 - **Reverb** is Schroeder — four combs and two allpasses, vectorised the same
   way as the string.
 

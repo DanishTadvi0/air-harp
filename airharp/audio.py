@@ -207,7 +207,8 @@ class Additive(Voice):
     """
 
     def __init__(self, freq, amp, ratios, gains, taus, attack, inharm=0.0,
-                 delay=0, sustain=0.0, release=0.4, drift=0.0, drift_hz=0.17):
+                 delay=0, sustain=0.0, release=0.4, drift=0.0, drift_hz=0.17,
+                 wow=0.0):
         # Amplitude belongs to the voice gain, never to the partials. Scaling
         # the partials too would apply it twice the moment anything retargets.
         super().__init__(delay, gain=amp)
@@ -234,6 +235,11 @@ class Additive(Voice):
         self.drift = float(drift)
         self.drift_hz = float(drift_hz)
         self.dphase = float(_rng.random())
+        # `wow` is slow pitch instability in cents, the thing that stops a
+        # stack of sine partials sounding like a test tone. Two rates that do
+        # not divide into each other, so it wanders instead of cycling.
+        self.wow = float(wow)
+        self.wph = [float(_rng.random()), float(_rng.random())]
         self.floor = 8e-4          # on the partial envelope, which is unit-scale
         self.rest = (self.g * float(sustain)).astype(np.float32)
         self.sustains = sustain > 0.0
@@ -248,9 +254,18 @@ class Additive(Voice):
         if self.sustains and self.rel < 0:
             self.rel = 0
 
+    WOW_A, WOW_B = 0.61, 1.07      # Hz, deliberately not a ratio of each other
+
     def _render(self, out, start):
         n = out.shape[0] - start
         t = _ARANGE[:n]
+        inc = self.inc
+        if self.wow:
+            self.wph[0] = (self.wph[0] + self.WOW_A * n / SR) % 1.0
+            self.wph[1] = (self.wph[1] + self.WOW_B * n / SR) % 1.0
+            cents = self.wow * (0.62 * np.sin(2.0 * np.pi * self.wph[0])
+                                + 0.38 * np.sin(2.0 * np.pi * self.wph[1]))
+            inc = inc * (2.0 ** (cents / 1200.0))
         g0 = self.g
         dec = self.dec ** n
         g1 = (self.rest + (g0 - self.rest) * dec).astype(np.float32)
@@ -261,7 +276,7 @@ class Additive(Voice):
             m1 = self.harm ** (-self.drift * np.sin(2.0 * np.pi * nxt))
             env = env * (m0[:, None] + (m1 - m0)[:, None] * _RAMP[None, :n])
             self.dphase = float(nxt % 1.0)
-        ph = self.phase[:, None] + self.inc[:, None] * t[None, :]
+        ph = self.phase[:, None] + inc[:, None] * t[None, :]
         idx = (ph * _TN).astype(np.int32) & _TMASK
         y = np.einsum('ij,ij->j', _SINE[idx], env)
 
@@ -278,7 +293,7 @@ class Additive(Voice):
                 self.done = True
 
         out[start:] += y * self._ramp(n)
-        self.phase = (self.phase + self.inc * n) % 1.0
+        self.phase = (self.phase + inc * n) % 1.0
         self.g = g1
         self.t += n
         if not self.sustains and float(g1.max()) < self.floor:
@@ -444,33 +459,45 @@ def _bell(freq, amp, bright, damp, delay):
 # other, but the two families are deliberately not matched across: a pad needs
 # more RMS than a pluck to feel equally present, because a pluck's transient
 # does the attention-grabbing for it, and the pad has the headroom spare.
-def _synth(freq, amp, bright, damp, delay):
-    """A soft pad that simply holds: no decay at all, so a chord stays exactly
-    as loud as you left it until you change shape or drop your hand.
+# Harmonic balance measured off a tape-keyboard recording, inside one held
+# chord rather than across the piece. It is not a smooth 1/n**p curve: the
+# third partial sits well below the fourth, and that dip is a good part of why
+# the tone reads as breathy rather than as a stack of sines. The overall slope
+# works out at about 1/n**1.95.
+_KEYS_PARTIALS = np.array([1.00, 0.54, 0.125, 0.246, 0.11, 0.105, 0.023, 0.033])
+_KEYS_DETUNE = 0.004      # two peaks ~7 cents apart in the recording
+_KEYS_WOW = 9.5           # cents rms of slow pitch wander, also measured
 
-    Six partials falling away steeply, which is why it is gentle rather than
-    buzzy -- a sawtooth carries every harmonic at 1/n and that brightness is
-    the whole of what made the first attempt sound robotic. The rolloff then
-    drifts slowly while the note is held, and the partials are doubled a few
-    cents apart so the two copies beat against each other.
+
+def _synth(freq, amp, bright, damp, delay):
+    """A soft pad that holds flat -- no decay at all, so a chord stays exactly
+    as loud as you left it until you change shape or slide away.
+
+    The harmonic balance, the detune and the slow pitch wander are all taken
+    from measurements of a tape keyboard rather than chosen by ear. The wander
+    is what matters most: a stack of sine partials at a perfectly fixed pitch
+    is the definition of a test tone, and eight or ten cents of slow drift is
+    most of the difference between that and something that sounds played.
     """
-    n = np.arange(1, 9, dtype=np.float64)
-    det = 0.004
-    ratios = np.concatenate([n * (1.0 - det * 0.5), n * (1.0 + det * 0.5)])
-    gains = np.tile(1.0 / n ** (2.15 - 0.5 * bright), 2) * 0.5
+    n = np.arange(1, len(_KEYS_PARTIALS) + 1, dtype=np.float64)
+    half = _KEYS_DETUNE * 0.5
+    ratios = np.concatenate([n * (1.0 - half), n * (1.0 + half)])
+    # brightness tilts the measured curve rather than replacing it
+    gains = np.tile(_KEYS_PARTIALS * n ** (0.45 * bright - 0.22), 2) * 0.5
     t60 = np.full(ratios.shape, 9.0)       # unused: sustain holds it flat
-    return Additive(freq, amp, ratios, gains, t60, 0.18, delay=delay,
-                    sustain=1.0, release=1.3, drift=0.30, drift_hz=0.17)
+    return Additive(freq, amp, ratios, gains, t60, 0.20, delay=delay,
+                    sustain=1.0, release=1.3, drift=0.22, drift_hz=0.17,
+                    wow=_KEYS_WOW)
 
 
 INSTRUMENTS = [                 # colours are BGR, the order OpenCV draws in
     Instrument("Harp",    (130, 205, 245), _harp,    1.46),                  # gold
     Instrument("Guitar",  (80, 140, 230), _guitar,  1.21),                   # copper
-    Instrument("Piano",   (250, 235, 225), _piano,   0.40, sustains=True),   # cool white
+    Instrument("Piano",   (250, 235, 225), _piano,   0.42, sustains=True),   # cool white
     Instrument("Violin",  (250, 150, 150), _violin,  0.24, sustains=True),   # periwinkle
     Instrument("Kalimba", (190, 240, 150), _kalimba, 0.49),                  # mint
-    Instrument("Bells",   (225, 170, 245), _bell,    0.47, sustains=True),   # violet
-    Instrument("Synth",   (255, 200, 130), _synth,   0.33, sustains=True),   # sky
+    Instrument("Bells",   (225, 170, 245), _bell,    0.45, sustains=True),   # violet
+    Instrument("Synth",   (255, 200, 130), _synth,   0.25, sustains=True),   # sky
 ]
 
 
