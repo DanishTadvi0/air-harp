@@ -26,7 +26,8 @@ All seven shapes are drawn along the foot of the screen the whole time you play.
 | index + little finger | chord vi |
 | those two + thumb | chord vii |
 | right hand, 1–5 fingers | how full the chord is: one note, a fifth, a triad, a seventh, an open voicing |
-| raise / lower a hand | louder and brighter / quieter and warmer |
+| slide the playing hand across | right is full, left fades, far left is silence |
+| raise / lower a hand | brighter / warmer |
 | close to a fist | stop |
 | `1`–`7` | harp, guitar, piano, violin, kalimba, bells, synth |
 | `[` `]` | change key · `m` major/minor · `d` stats · `q` quit |
@@ -131,9 +132,18 @@ keeps playing for 160 ms before it is let go. A test feeds a reading that
 alternates between two shapes every frame for two seconds and asserts the chord
 never moves — while the screen still shows, faintly, that it is unsure.
 
-**Nothing recognised can silence a note.** A fist is the one gesture that stops
-the sound, and that is a deliberate control. No confidence score, threshold or
-classifier sits between a hand and a sound.
+**Nothing recognised can silence a note.** Two gestures stop the sound -- a
+fist, and running the playing hand off the left of the fader -- and both are
+deliberate controls the player reaches for. Nothing else can. No confidence
+score, threshold or classifier sits between a hand and a sound, so a misread
+hand plays a different chord and never plays silence.
+
+**Volume is across, tone is up.** The playing hand's horizontal position is a
+fader: full at the right, fading to true silence at the left, on an amplitude
+taper so the sweep sounds even rather than dropping away at the end. Walking
+the hand slowly leftward is how a chord is made to die over a chosen number of
+seconds, which is the one thing a held pose otherwise cannot express. Height is
+left for brightness, so the two axes stay independent.
 
 ### Threading
 

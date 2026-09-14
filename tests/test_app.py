@@ -39,8 +39,9 @@ class Player:
             self.t += DT
         return self.canvas
 
-    def shape(self, degree, y=180.0, label="Left", frames=8, right=None):
-        hands = [make_hand(320.0, y=y, fingers=DEGREE_SHAPES[degree], label=label)]
+    def shape(self, degree, y=180.0, label="Left", frames=8, right=None, x=None):
+        hands = [make_hand(W * 0.95 if x is None else x, y=y,
+                           fingers=DEGREE_SHAPES[degree], label=label)]
         if right is not None:
             hands.append(make_hand(500.0, y=y, fingers=fist(right), label="Right"))
         return self.hold(hands, frames)
@@ -100,19 +101,40 @@ def test_a_fist_stops_the_sound(app):
     assert np.abs(tail[-len(tail) // 4:]).max() < 1e-3
 
 
-def test_lowering_the_hand_quietens_without_restarting(app):
+def test_drifting_left_quietens_without_restarting(app):
+    """The fade has to be the same chord getting quieter, not a new one."""
     app.handle_key(ord("4"))                    # violin
     p = Player(app)
-    p.shape(3, y=30.0, frames=10)
+    p.shape(3, x=W * 0.95, frames=10)
     loud = float(np.sqrt((audio_of(app, 0.8)[-8000:] ** 2).mean()))
     voices = {id(v) for v in app.engine.groups[App.VOICE].values()}
 
-    p.shape(3, y=H - 30.0, frames=12)
+    p.shape(3, x=W * 0.30, frames=12)
     quiet = float(np.sqrt((audio_of(app, 0.8)[-8000:] ** 2).mean()))
 
-    assert quiet < loud * 0.75
+    assert quiet < loud * 0.5
     assert {id(v) for v in app.engine.groups[App.VOICE].values()} == voices
-    assert app.chords == 1, "raising and lowering is expression, not a new chord"
+    assert app.chords == 1, "sliding across is expression, not a new chord"
+
+
+def test_drifting_to_the_far_left_dies_away(app):
+    """Hold the shape, slide left, and it should go silent without ever
+    being let go of -- so sliding back brings the same chord in again."""
+    app.handle_key(ord("4"))
+    p = Player(app)
+    p.shape(3, x=W * 0.95, frames=10)
+    audio_of(app, 0.5)
+
+    for x in np.linspace(W * 0.95, 0.0, 12):
+        p.shape(3, x=float(x), frames=3)
+    tail = audio_of(app, 2.0)
+    assert np.abs(tail[-len(tail) // 3:]).max() < 5e-3, "should have died away"
+    assert app.engine.groups.get(App.VOICE), "but never actually released"
+    assert app.chords == 1
+
+    p.shape(3, x=W * 0.95, frames=12)
+    back = audio_of(app, 1.0)
+    assert np.abs(back).max() > 0.02, "sliding back should bring it in again"
 
 
 def test_a_low_hand_is_quiet_but_never_silent(app):

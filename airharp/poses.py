@@ -145,7 +145,8 @@ class PoseReader:
 
     HOLD = 0.09         # seconds a new shape must persist before it is believed
     NULL = 0.16         # seconds of lost tracking before the hand is released
-    FLOOR = 0.18        # quietest a hand can get without going silent
+    EDGE = 0.08         # dead margin either side: tracking is poor at the frame edge
+    TAPER = 1.8         # amplitude curve across the sweep, so the fade sounds even
 
     def __init__(self, key=None):
         self.key = key
@@ -200,8 +201,15 @@ class PoseReader:
 
             up = st["up"]
             x, y = float(hand.tip[0]), float(hand.tip[1])
-            # Height is continuous and never stabilised: it is expression, and
+            # Neither of these is ever stabilised: they are expression, and
             # expression that snaps to steps sounds mechanical.
+            #
+            # Across is the fader. Right is loud, left fades away, and the far
+            # left is silence -- so how slowly you drift left is how long the
+            # chord takes to die. A margin at each end keeps the extremes
+            # reachable, because tracking is worst at the edge of frame.
+            across = (x / max(width, 1) - self.EDGE) / (1.0 - 2.0 * self.EDGE)
+            across = float(np.clip(across, 0.0, 1.0))
             high = float(np.clip(1.0 - y / max(height, 1), 0.0, 1.0))
             states.append(HandState(
                 label=hand.label,
@@ -209,7 +217,7 @@ class PoseReader:
                 degree=degree_of(up),
                 voicing=min(sum(up), len(VOICINGS) - 1),
                 x=x, y=y,
-                level=self.FLOOR + (1.0 - self.FLOOR) * high ** 0.75,
+                level=across ** self.TAPER,
                 bright=high ** 0.85,
                 raw_fingers=int(raw_up.sum()),
                 settling=settling,
@@ -250,10 +258,11 @@ class PoseReader:
         else:
             voicing = DEFAULT_VOICING
 
-        loud = [st for st in states if st.fingers > 0] or states
+        # The fader belongs to whichever hand is naming the chord, so one hand
+        # controls both and the other is free to do nothing at all.
         return Chord(
             degree=int(np.clip(lead.degree, 0, DEGREES - 1)),
             voicing=int(voicing),
-            level=float(np.mean([st.level for st in loud])),
-            bright=float(np.mean([st.bright for st in loud])),
+            level=float(lead.level),
+            bright=float(lead.bright),
         )

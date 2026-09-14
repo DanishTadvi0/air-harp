@@ -224,12 +224,13 @@ class Key {
 class PoseReader {
   static HOLD = 0.09;
   static NULL = 0.16;
-  static FLOOR = 0.18;
+  static EDGE = 0.08;    // dead margin: tracking is poor at the frame edge
+  static TAPER = 1.8;    // amplitude curve, so the fade sounds even
 
   constructor() { this.state = new Map(); this.chord = null; }
   reset() { this.state.clear(); this.chord = null; }
 
-  update(hands, height, now) {
+  update(hands, width, height, now) {
     const states = [], live = new Set();
 
     for (const h of hands) {
@@ -249,15 +250,22 @@ class PoseReader {
       } else { st.cand = rawKey; st.since = now; settling = true; }
 
       const fingers = st.up.reduce((a, b) => a + (b ? 1 : 0), 0);
-      // Height is continuous and never stabilised: it is expression, and
+      // Neither of these is ever stabilised: they are expression, and
       // expression that snaps to steps sounds mechanical.
+      //
+      // Across is the fader. Right is loud, left fades away, and the far left
+      // is silence -- so how slowly you drift left is how long the chord takes
+      // to die. A margin at each end keeps the extremes reachable.
+      const acrossRaw = (h.py[INDEX_TIP * 2] / Math.max(width, 1) - PoseReader.EDGE)
+                        / (1 - 2 * PoseReader.EDGE);
+      const across = Math.min(1, Math.max(0, acrossRaw));
       const high = Math.min(1, Math.max(0, 1 - h.py[INDEX_TIP * 2 + 1] / height));
       states.push({
         label: h.label, up: st.up, fingers,
         degree: degreeOf(st.up),
         voicing: Math.min(fingers, VOICINGS.length - 1),
         x: h.py[INDEX_TIP * 2], y: h.py[INDEX_TIP * 2 + 1],
-        level: PoseReader.FLOOR + (1 - PoseReader.FLOOR) * Math.pow(high, 0.75),
+        level: Math.pow(across, PoseReader.TAPER),
         bright: Math.pow(high, 0.85),
         settling, px: h.py,
       });
@@ -289,13 +297,9 @@ class PoseReader {
     if (fuller && fuller !== lead && fuller.fingers > 0) voicing = fuller.voicing;
     else if (fuller === lead) voicing = lead.voicing;
 
-    const loud = states.filter((s) => s.fingers > 0);
-    const pool = loud.length ? loud : states;
-    return {
-      degree: lead.degree, voicing,
-      level: pool.reduce((a, s) => a + s.level, 0) / pool.length,
-      bright: pool.reduce((a, s) => a + s.bright, 0) / pool.length,
-    };
+    // The fader belongs to whichever hand is naming the chord, so one hand
+    // controls both and the other is free to do nothing at all.
+    return { degree: lead.degree, voicing, level: lead.level, bright: lead.bright };
   }
 }
 
@@ -380,6 +384,7 @@ class HUD {
     this.drawRibbons(ctx, states, chord, tint, w, h, BAR + GUIDE);
     this.drawHands(ctx, states, tint);
     this.drawReadout(ctx, chord, states, tint, w, h);
+    this.drawFader(ctx, states, chord, tint, w, h, BAR, GUIDE);
     this.drawGuide(ctx, chord, tint, w, h, BAR, GUIDE);
     this.drawBar(ctx, inst, w, h, BAR);
     this.drawStatus(ctx, inst, w, h, fps, !chord);
@@ -466,6 +471,39 @@ class HUD {
     ctx.fillRect(bx, by, bw, 5);
     ctx.fillStyle = css(tint, 0.95);
     ctx.fillRect(bx, by, bw * chord.level, 5);
+  }
+
+  /** Volume is how far right the playing hand is, and a control you cannot
+   *  see is a control you have to remember. The track spans the sweep, the
+   *  marker is the hand, and the left end is drawn as a hard stop because
+   *  that is what it is: silence. */
+  drawFader(ctx, states, chord, tint, w, h, BAR, GUIDE) {
+    const lead = states.find((s) => s.leads);
+    const y = h - BAR - GUIDE - 26;
+    const x0 = w * PoseReader.EDGE, x1 = w * (1 - PoseReader.EDGE);
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+
+    if (chord && lead) {
+      ctx.strokeStyle = css(tint, 0.85);
+      ctx.beginPath(); ctx.moveTo(x0, y);
+      ctx.lineTo(x0 + (x1 - x0) * chord.level, y); ctx.stroke();
+      const mx = Math.min(Math.max(lead.x, x0), x1);
+      ctx.strokeStyle = css(tint, 1); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(mx, y - 9); ctx.lineTo(mx, y + 9); ctx.stroke();
+      ctx.beginPath(); ctx.arc(mx, y, 5, 0, 6.284);
+      ctx.fillStyle = css(tint, 1); ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(200,196,215,0.55)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x0, y - 7); ctx.lineTo(x0, y + 7); ctx.stroke();
+    ctx.font = `${Math.round(h * 0.024)}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(200,196,215,0.55)";
+    ctx.fillText("silent", x0 + 8, y - 12);
+    ctx.textAlign = "right";
+    ctx.fillStyle = css(tint, 0.65);
+    ctx.fillText("full", x1 - 8, y - 12);
   }
 
   /** All seven chords with the hand shape that reaches each one. This is the
@@ -750,7 +788,7 @@ function frame(nowMs) {
   fps = fps ? fps * 0.9 + 0.1 / dt : 1 / dt;
 
   if (demoMode) {
-    const { states, chord, changed } = reader.update(demoHands(now, w, h), h, now);
+    const { states, chord, changed } = reader.update(demoHands(now, w, h), w, h, now);
     play(chord, changed);
     cached = { states, chord };
   } else if (video.currentTime !== lastVideoTime && video.readyState >= 2) {
@@ -760,7 +798,7 @@ function frame(nowMs) {
     try {
       const result = landmarker.detectForVideo(video, nowMs);
       const hands = readHands(result, w, h, dt);
-      const { states, chord, changed } = reader.update(hands, h, now);
+      const { states, chord, changed } = reader.update(hands, w, h, now);
       play(chord, changed);
       cached = { states, chord };
     } catch (e) { /* a dropped frame is not worth stopping for */ }

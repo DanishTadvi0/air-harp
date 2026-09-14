@@ -48,8 +48,11 @@ class Clock:
         return states, chord, changes, released
 
 
-def hand(shape, y=360.0, label="Left", **kw):
-    return [make_hand(640.0, y=y, fingers=shape, label=label, **kw)]
+def hand(shape, y=360.0, x=None, label="Left", **kw):
+    # Default to the far right, which is full level, so tests that are not
+    # about the fader are not accidentally about the fader.
+    return [make_hand(W * 0.95 if x is None else x, y=y, fingers=shape,
+                      label=label, **kw)]
 
 
 # -- counting fingers -------------------------------------------------------
@@ -148,25 +151,65 @@ def test_a_fist_stops_it(reader):
     assert chord is None and changes == 1
 
 
-def test_height_sets_level_and_brightness_continuously(reader):
+def test_across_the_frame_is_the_fader(reader):
+    """Right is loud, left is quiet. Nothing to do with height."""
     out = {}
-    for name, y in (("high", 60.0), ("low", H - 90.0)):
+    for name, x in (("right", W * 0.95), ("middle", W * 0.5), ("left", W * 0.2)):
         reader.reset()
-        _, chord, _, _ = Clock(reader).feed(hand(DEGREE_SHAPES[0], y=y), 4)
-        out[name] = chord
-    assert out["high"].level > out["low"].level + 0.3
-    assert out["high"].bright > out["low"].bright + 0.3
-    assert out["low"].level >= PoseReader.FLOOR, "a low hand is quiet, never silent"
+        _, chord, _, _ = Clock(reader).feed(hand(DEGREE_SHAPES[0], x=x), 4)
+        out[name] = chord.level
+    assert out["right"] > out["middle"] > out["left"]
+    assert out["right"] > 0.9
+
+
+def test_the_far_left_is_silence(reader):
+    """The whole point of the sweep: keep going left and the chord dies."""
+    for x in (0.0, W * 0.02, W * 0.07):
+        reader.reset()
+        _, chord, _, _ = Clock(reader).feed(hand(DEGREE_SHAPES[0], x=x), 4)
+        assert chord is not None, "the chord is still chosen, just silent"
+        assert chord.level == 0.0, f"x={x} should be silent"
+
+
+def test_the_fade_is_monotonic_all_the_way_down(reader):
+    """Drifting left must never get louder on the way, or the fade would
+    sound like it was wobbling rather than dying."""
+    levels = []
+    for x in np.linspace(W * 0.95, 0.0, 30):
+        reader.reset()
+        _, chord, _, _ = Clock(reader).feed(hand(DEGREE_SHAPES[0], x=float(x)), 3)
+        levels.append(chord.level)
+    assert all(b <= a + 1e-9 for a, b in zip(levels, levels[1:])), levels
+    assert levels[0] > 0.9 and levels[-1] == 0.0
 
 
 def test_level_is_not_quantised(reader):
     """Expression that snaps to steps sounds mechanical."""
     seen = set()
-    for y in np.linspace(100, H - 100, 25):
+    for x in np.linspace(W * 0.12, W * 0.9, 25):
         reader.reset()
-        _, chord, _, _ = Clock(reader).feed(hand(DEGREE_SHAPES[0], y=float(y)), 3)
+        _, chord, _, _ = Clock(reader).feed(hand(DEGREE_SHAPES[0], x=float(x)), 3)
         seen.add(round(chord.level, 4))
     assert len(seen) >= 20
+
+
+def test_height_still_sets_brightness(reader):
+    """Across and up are independent: one is how loud, the other is how open."""
+    out = {}
+    for name, y in (("high", 60.0), ("low", H - 90.0)):
+        reader.reset()
+        _, chord, _, _ = Clock(reader).feed(hand(DEGREE_SHAPES[0], y=y), 4)
+        out[name] = chord
+    assert out["high"].bright > out["low"].bright + 0.3
+    assert out["high"].level == pytest.approx(out["low"].level),         "height must not touch the fader"
+
+
+def test_the_fader_belongs_to_the_hand_naming_the_chord(reader):
+    """One hand does chord and volume, so the other is free to do nothing."""
+    hands = [make_hand(W * 0.2, fingers=DEGREE_SHAPES[0], label="Left"),
+             make_hand(W * 0.95, fingers=fist(3), label="Right")]
+    _, chord, _, _ = Clock(reader).feed(hands, 6)
+    assert chord.level < 0.1, "the left hand is low, so it is quiet"
 
 
 # -- two hands --------------------------------------------------------------
