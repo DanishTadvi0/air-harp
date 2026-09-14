@@ -288,7 +288,7 @@ const harmonics = (k, rolloff, t0, fall) => {
   const n = [], g = [], t = [];
   for (let i = 1; i <= k; i++) {
     n.push(i);
-    g.push(Math.pow(i, -rolloff) * Math.exp(-i * 0.045));
+    g.push(Math.pow(i, -rolloff) * Math.exp(-i * 0.055));
     t.push(t0 / Math.pow(i, fall));
   }
   return [n, g, t];
@@ -302,12 +302,13 @@ const INSTRUMENTS = [
   // Sustain sits high and the decay toward it is slow, so a chord keeps its
   // body for a second or two instead of thinning out straight after the hit;
   // the long release lets one chord ring on under the next.
-  { name: "Piano", gain: 0.19, sustains: true,
+  { name: "Piano", gain: 0.40, sustains: true,
     make: (f, a, b, d) => {
-      const [n, g, t] = harmonics(8, 1.15 - 0.35 * b, 2.6 + 3.0 * d, 0.72);
-      return new Additive(f, a, n, g, t.map((x) => x * tilt(f, 0.22)), 0.004, 0.00028, 0.55, 1.4);
+      const [n, g, t] = harmonics(8, 1.55 - 0.35 * b, 2.6 + 3.0 * d, 0.72);
+      return new Additive(f, a, n, g, t.map((x) => x * tilt(f, 0.22)),
+                          0.006, 0.00028, 0.55, 1.4, 0.18, 0.11);
     } },
-  { name: "Violin", gain: 0.12, sustains: true,
+  { name: "Violin", gain: 0.24, sustains: true,
     make: (f, a, b) => new Bowed(f, a, 0.25 + 0.75 * b) },
   { name: "Kalimba", gain: 0.49, sustains: false,
     make: (f, a, b, d) => {
@@ -316,7 +317,7 @@ const INSTRUMENTS = [
       const t = [1, 0.55, 0.33, 0.18, 0.11].map((x) => x * (0.6 + 1.1 * d) * tilt(f, 0.25));
       return new Additive(f, a, n, g, t, 0.002);
     } },
-  { name: "Bells", gain: 0.21, sustains: true,
+  { name: "Bells", gain: 0.47, sustains: true,
     make: (f, a, b, d) => {
       const n = [0.5, 1, 1.19, 1.56, 2, 2.51, 2.66, 3.01];
       const g = [0.55, 1, 0.42, 0.34, 0.55, 0.22, 0.18, 0.13].map((x) => x * (0.5 + 0.8 * b));
@@ -329,13 +330,13 @@ const INSTRUMENTS = [
   // 1/n and that brightness is what made the first attempt sound robotic. The
   // rolloff drifts slowly while the note is held, and the partials are doubled
   // a few cents apart so the two copies beat against each other.
-  { name: "Synth", gain: 0.14, sustains: true,
+  { name: "Synth", gain: 0.33, sustains: true,
     make: (f, a, b) => {
       const det = 0.004, ratios = [], gains = [], t60 = [];
       for (const side of [1 - det * 0.5, 1 + det * 0.5])
-        for (let n = 1; n <= 6; n++) {
+        for (let n = 1; n <= 8; n++) {
           ratios.push(n * side);
-          gains.push(0.5 * Math.pow(n, -(2.6 - 0.5 * b)));
+          gains.push(0.5 * Math.pow(n, -(2.15 - 0.5 * b)));
           t60.push(9);                       // unused: sustain holds it flat
         }
       return new Additive(f, a, ratios, gains, t60, 0.18, 0, 1.0, 1.3, 0.30, 0.17);
@@ -394,9 +395,10 @@ class AirHarpProcessor extends AudioWorkletProcessor {
     this.voices = [];
     this.groups = new Map();       // key -> Map(noteId -> voice)
     this.instrument = 0;
-    this.master = 0.62;
+    this.master = 1.0;
     this.reverb = new Reverb();
     this.buf = new Float32Array(256);
+    this.knee = 0.72;
     this.peak = 0;
     this.port.onmessage = (e) => this.command(e.data);
   }
@@ -484,9 +486,15 @@ class AirHarpProcessor extends AudioWorkletProcessor {
     this.reverb.process(buf, n);
 
     let peak = 0;
+    const knee = this.knee, span = 1 - knee;
     for (let s = 0; s < n; s++) {
-      // Soft clip: a fistful of notes at once should compress, not crack.
-      const y = Math.tanh(buf[s] * this.master);
+      // Leave everything below the knee alone and curve only what is above.
+      // A bare tanh bends the whole signal -- tanh(0.5) is already 8% off --
+      // so quiet playing pays for headroom it never needed.
+      const x = buf[s] * this.master;
+      const ax = x < 0 ? -x : x;
+      const y = ax <= knee ? x
+        : Math.sign(x) * (knee + span * Math.tanh((ax - knee) / span));
       out[0][s] = y;
       if (out.length > 1) out[1][s] = y;
       const a = y < 0 ? -y : y;

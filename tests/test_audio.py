@@ -95,12 +95,47 @@ def test_held_instruments_are_loudness_matched():
     assert max(levels.values()) / min(levels.values()) < 1.35, levels
 
 
-def test_a_held_chord_sits_near_a_struck_one():
-    """Not identical -- a pad should sit under a transient -- but the same
-    order, so switching families is not a jump scare."""
+def test_a_held_chord_sits_above_a_struck_one():
+    """The two families are deliberately not matched to each other.
+
+    A pluck spends its level on a transient -- peaks near full scale, average
+    far below it -- while a pad is nearly all average and sits on ten-plus dB
+    of unused headroom. Matching them by RMS makes the pad sound faint next to
+    the harp even though a meter says they agree. So held sits above struck,
+    by enough to be present and not so much that switching is a jump scare.
+    """
     ring = np.mean(list(_levels(sustaining=False).values()))
     hold = np.mean(list(_levels(sustaining=True).values()))
-    assert 0.4 < hold / ring < 1.2, (ring, hold)
+    assert 1.4 < hold / ring < 3.2, (ring, hold)
+
+
+def test_nothing_clips_even_with_both_hands_flat_out():
+    """The knee has to hold the worst case a player can actually produce."""
+    from airharp.audio import _KNEE
+    for i in range(len(INSTRUMENTS)):
+        eng = Engine(silent=True)
+        eng.set_instrument(i)
+        for hand, notes in (("L", (110.0, 138.6, 164.8, 220.0, 277.2)),
+                            ("R", (164.8, 207.7, 246.9, 329.6, 415.3))):
+            eng.set_chord(hand, notes, 1.0, 1.0, 1.0)
+        buf = render(eng, 2.5)
+        assert np.isfinite(buf).all(), INSTRUMENTS[i].name
+        assert np.abs(buf).max() <= 1.0, INSTRUMENTS[i].name
+
+
+def test_normal_playing_never_reaches_the_limiter():
+    """A bare tanh bends quiet passages to buy headroom they never needed.
+    With a knee, ordinary playing should pass through untouched."""
+    from airharp.audio import _KNEE
+    for i in range(len(INSTRUMENTS)):
+        eng = Engine(silent=True)
+        eng.set_instrument(i)
+        eng.set_chord("h", CHORD, 0.7, 0.6, 0.6)
+        buf = render(eng, 2.5)
+        touched = float((np.abs(buf) > _KNEE).mean())
+        assert touched < 0.005, (
+            f"{INSTRUMENTS[i].name}: {touched*100:.2f}% of samples limited "
+            f"during ordinary playing")
 
 
 def test_both_hands_playing_flat_out_stays_in_range(engine):

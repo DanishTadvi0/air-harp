@@ -411,10 +411,11 @@ def _piano(freq, amp, bright, damp, delay):
     # sustain sits high and the decay toward it is slow, so a chord keeps its
     # body for a second or two instead of thinning out straight after the hit,
     # and the long release lets one chord ring on under the next.
-    n, g, t60 = _harmonics(8, 1.15 - 0.35 * bright, 2.6 + 3.0 * damp, 0.72)
-    g = g * np.exp(-n * 0.045)
-    return Additive(freq, amp, n, g, t60 * _tilt(freq, 0.22), 0.004,
-                    inharm=0.00028, delay=delay, sustain=0.55, release=1.4)
+    n, g, t60 = _harmonics(8, 1.55 - 0.35 * bright, 2.6 + 3.0 * damp, 0.72)
+    g = g * np.exp(-n * 0.055)
+    return Additive(freq, amp, n, g, t60 * _tilt(freq, 0.22), 0.006,
+                    inharm=0.00028, delay=delay, sustain=0.55, release=1.4,
+                    drift=0.18, drift_hz=0.11)
 
 
 def _violin(freq, amp, bright, damp, delay):
@@ -437,9 +438,12 @@ def _bell(freq, amp, bright, damp, delay):
                     sustain=0.38, release=0.9)
 
 
-# The gains are loudness-matched, not guesses: `python -m airharp.calibrate`
-# renders one note per instrument across three octaves and reports the trim
-# needed to bring each to the same one-second RMS.
+# Gains are measured, not guessed: `python -m airharp.calibrate` renders one
+# note per instrument across three octaves and reports the trim each needs.
+# The struck instruments are matched to each other and the held ones to each
+# other, but the two families are deliberately not matched across: a pad needs
+# more RMS than a pluck to feel equally present, because a pluck's transient
+# does the attention-grabbing for it, and the pad has the headroom spare.
 def _synth(freq, amp, bright, damp, delay):
     """A soft pad that simply holds: no decay at all, so a chord stays exactly
     as loud as you left it until you change shape or drop your hand.
@@ -450,10 +454,10 @@ def _synth(freq, amp, bright, damp, delay):
     drifts slowly while the note is held, and the partials are doubled a few
     cents apart so the two copies beat against each other.
     """
-    n = np.arange(1, 7, dtype=np.float64)
+    n = np.arange(1, 9, dtype=np.float64)
     det = 0.004
     ratios = np.concatenate([n * (1.0 - det * 0.5), n * (1.0 + det * 0.5)])
-    gains = np.tile(1.0 / n ** (2.6 - 0.5 * bright), 2) * 0.5
+    gains = np.tile(1.0 / n ** (2.15 - 0.5 * bright), 2) * 0.5
     t60 = np.full(ratios.shape, 9.0)       # unused: sustain holds it flat
     return Additive(freq, amp, ratios, gains, t60, 0.18, delay=delay,
                     sustain=1.0, release=1.3, drift=0.30, drift_hz=0.17)
@@ -462,12 +466,36 @@ def _synth(freq, amp, bright, damp, delay):
 INSTRUMENTS = [                 # colours are BGR, the order OpenCV draws in
     Instrument("Harp",    (130, 205, 245), _harp,    1.46),                  # gold
     Instrument("Guitar",  (80, 140, 230), _guitar,  1.21),                   # copper
-    Instrument("Piano",   (250, 235, 225), _piano,   0.19, sustains=True),   # cool white
-    Instrument("Violin",  (250, 150, 150), _violin,  0.12, sustains=True),   # periwinkle
+    Instrument("Piano",   (250, 235, 225), _piano,   0.40, sustains=True),   # cool white
+    Instrument("Violin",  (250, 150, 150), _violin,  0.24, sustains=True),   # periwinkle
     Instrument("Kalimba", (190, 240, 150), _kalimba, 0.49),                  # mint
-    Instrument("Bells",   (225, 170, 245), _bell,    0.21, sustains=True),   # violet
-    Instrument("Synth",   (255, 200, 130), _synth,   0.14, sustains=True),   # sky
+    Instrument("Bells",   (225, 170, 245), _bell,    0.47, sustains=True),   # violet
+    Instrument("Synth",   (255, 200, 130), _synth,   0.33, sustains=True),   # sky
 ]
+
+
+# ---------------------------------------------------------------------------
+# output limiting
+# ---------------------------------------------------------------------------
+
+_KNEE = 0.72
+
+
+def _limit(x, knee=_KNEE):
+    """Leave everything below the knee exactly alone; curve only what is above.
+
+    A bare `tanh` is tempting but it bends the whole signal -- `tanh(0.5)` is
+    already 8% off -- so quiet playing is distorted to buy headroom that quiet
+    playing never needed. This keeps normal playing linear and only compresses
+    the fistful-of-notes case, which is what allows the master to come up
+    instead of sitting low to stay clear of a clip that rarely happens.
+    """
+    a = np.abs(x)
+    over = a > knee
+    if over.any():
+        span = 1.0 - knee
+        x[over] = np.sign(x[over]) * (knee + span * np.tanh((a[over] - knee) / span))
+    return x
 
 
 # ---------------------------------------------------------------------------
@@ -534,7 +562,7 @@ class Engine:
         self.pending = deque()
         self.groups = {}          # hand label -> {note id: held voice}
         self.instrument = 0
-        self.master = 0.62
+        self.master = 1.0
         self.reverb = Reverb() if reverb else None
         self.q = queue.Queue(maxsize=QUEUE_BLOCKS)
         self.underruns = 0
@@ -685,8 +713,7 @@ class Engine:
         if self.reverb is not None:
             out = self.reverb.process(out)
         out *= self.master
-        # Soft clip: a fistful of simultaneous plucks should compress, not crack.
-        np.tanh(out, out=out)
+        _limit(out)
         p = float(np.abs(out).max()) if n else 0.0
         self.peak = max(p, self.peak * 0.86)
         return out
