@@ -157,7 +157,8 @@ class Key {
   constructor(root = 48, scale = "major") { this.root = root; this.scale = scale; this.build(); }
   build() {
     this.parent = this.scale === "major" ? MAJOR : MINOR;
-    this.roots = []; this.names = []; this.rootNames = []; this.quality = [];
+    this.roots = []; this.names = []; this.rootNames = [];
+    this.quality = []; this.seventh = [];
     const SUFFIX = { maj: "", min: "m", dim: "dim", aug: "aug" };
     for (let d = 0; d < DEGREES; d++) {
       const p = this.pitch(d);
@@ -166,6 +167,12 @@ class Key {
       // diminished -- the fifth is what tells them apart.
       const q = third >= 4 ? (fifth === 7 ? "maj" : "aug")
                            : (fifth === 7 ? "min" : "dim");
+      // Appending a bare "7" to every degree is wrong the same way: on the
+      // tonic of a major key the stacked seventh is a major seventh, and "A7"
+      // names the dominant, which is a different chord.
+      const sev = this.pitch(d + 6) - p;
+      this.seventh.push(third >= 4 ? (sev === 11 ? "maj7" : "7")
+                                   : (fifth === 6 ? "m7b5" : "m7"));
       this.roots.push(p);
       this.quality.push(q);
       this.rootNames.push(noteName(p));
@@ -198,7 +205,8 @@ class Key {
     // that interval is a tritone, so the name would be a lie.
     if (kind === "fifth")
       return ["maj", "min"].includes(this.quality[degree]) ? base.replace(/m$/, "") + "5" : base;
-    if (kind === "seventh") return base + "7";
+    if (kind === "seventh")
+      return this.rootNames[degree].slice(0, -1) + this.seventh[degree];
     return base;
   }
 }

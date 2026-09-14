@@ -37,7 +37,9 @@ def test_the_seventh_degree_is_diminished_not_minor(key):
     calling it B minor is the classic way to get this wrong."""
     assert key.quality == ["maj", "min", "min", "maj", "maj", "min", "dim"]
     assert key.names[6] == "Bdim"
-    assert key.label(6, 4) == "Bdim7"
+    # B-D-F-A is half-diminished, not fully diminished: "Bdim7" would mean
+    # B-D-F-Ab, a chord this degree does not produce.
+    assert key.label(6, 4) == "Bm7b5"
 
 
 def test_a_diminished_degree_is_never_labelled_a_power_chord(key):
@@ -133,7 +135,7 @@ def test_labels_say_what_is_actually_sounding(key):
     assert key.label(0, 1) == "C3"
     assert key.label(0, 2) == "C5"          # a bare fifth
     assert key.label(0, 3) == "C"
-    assert key.label(0, 4) == "C7"
+    assert key.label(0, 4) == "Cmaj7"
     assert key.label(1, 4) == "Dm7"
 
 
@@ -166,3 +168,33 @@ def test_toggling_scale_keeps_the_same_root(key):
     assert key.scale == "minor" and key.root == root
     key.toggle_scale()
     assert key.scale == "major"
+
+
+def test_sevenths_are_named_by_what_they_actually_are(key):
+    """Appending a bare "7" to every degree is wrong the same way reading a
+    triad from its third alone is. On the tonic of a major key the stacked
+    seventh is a major seventh; "C7" names the dominant, a different chord."""
+    assert [key.label(d, 4) for d in range(DEGREES)] == [
+        "Cmaj7", "Dm7", "Em7", "Fmaj7", "G7", "Am7", "Bm7b5"]
+
+
+def test_only_the_fifth_degree_carries_a_dominant_seventh(key):
+    """In a major key exactly one degree has a major third with a minor
+    seventh on top. That is what makes it the dominant."""
+    dominants = [d for d in range(DEGREES) if key.seventh[d] == "7"]
+    assert dominants == [4]
+
+
+def test_sevenths_are_right_in_a_minor_key_too():
+    k = Key(root=45, scale="minor")
+    assert [k.label(d, 4) for d in range(DEGREES)] == [
+        "Am7", "Bm7b5", "Cmaj7", "Dm7", "Em7", "Fmaj7", "G7"]
+
+
+def test_a_seventh_label_always_matches_the_notes_it_plays(key):
+    """The label and the frequencies must never disagree."""
+    suffix_to_intervals = {"maj7": [0, 4, 7, 11], "7": [0, 4, 7, 10],
+                           "m7": [0, 3, 7, 10], "m7b5": [0, 3, 6, 10]}
+    for d in range(DEGREES):
+        pitches = semitones(key.chord(d, 4)[0])
+        assert list(pitches - pitches[0]) == suffix_to_intervals[key.seventh[d]]

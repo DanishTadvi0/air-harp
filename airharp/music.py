@@ -65,6 +65,7 @@ class Key:
         self.roots = np.array([self._pitch(d) for d in range(DEGREES)],
                               dtype=np.float64)
         self.quality = [self._quality(d) for d in range(DEGREES)]
+        self.seventh = [self._seventh(d) for d in range(DEGREES)]
         self.names = [self._chord_name(d) for d in range(DEGREES)]
         self.root_names = [note_name(m) for m in self.roots]
 
@@ -82,6 +83,22 @@ class Key:
         if third >= 4:
             return "maj" if fifth == 7 else "aug"
         return "min" if fifth == 7 else "dim"
+
+    def _seventh(self, degree):
+        """Which kind of seventh sits on this degree.
+
+        Appending a bare "7" to every degree is wrong in the same way as
+        reading a triad from its third alone: on the tonic of a major key the
+        stacked seventh is a major seventh, and "A7" means the dominant one,
+        which is a different chord.
+        """
+        root = self._pitch(degree)
+        third = self._pitch(degree + 2) - root
+        fifth = self._pitch(degree + 4) - root
+        seventh = self._pitch(degree + 6) - root
+        if third >= 4:
+            return "maj7" if seventh == 11 else "7"
+        return "m7b5" if fifth == 6 else "m7"
 
     def _chord_name(self, degree):
         root = note_name(self._pitch(degree))[:-1]
@@ -130,5 +147,5 @@ class Key:
                 return base.rstrip("m") + "5"
             return base
         if kind == "seventh":
-            return base + "7"
+            return self.root_names[degree][:-1] + self.seventh[degree]
         return base
