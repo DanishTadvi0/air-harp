@@ -490,6 +490,23 @@ def _synth(freq, amp, bright, damp, delay):
                     wow=_KEYS_WOW)
 
 
+def _glass(freq, amp, bright, damp, delay):
+    """Six partials falling away hard, and nothing else.
+
+    Where the synth is tuned to imitate a particular keyboard, this one is
+    simply the gentlest thing the engine can make: almost no upper harmonics,
+    a slow swell, and a rolloff that drifts while the note is held. Under one
+    per cent of its energy sits above 2 kHz, against a third for a sawtooth.
+    """
+    n = np.arange(1, 7, dtype=np.float64)
+    half = 0.004 * 0.5
+    ratios = np.concatenate([n * (1.0 - half), n * (1.0 + half)])
+    gains = np.tile(1.0 / n ** (2.6 - 0.5 * bright), 2) * 0.5
+    t60 = np.full(ratios.shape, 9.0)       # unused: sustain holds it flat
+    return Additive(freq, amp, ratios, gains, t60, 0.18, delay=delay,
+                    sustain=1.0, release=1.3, drift=0.30, drift_hz=0.17)
+
+
 INSTRUMENTS = [                 # colours are BGR, the order OpenCV draws in
     Instrument("Harp",    (130, 205, 245), _harp,    1.46),                  # gold
     Instrument("Guitar",  (80, 140, 230), _guitar,  1.21),                   # copper
@@ -497,7 +514,8 @@ INSTRUMENTS = [                 # colours are BGR, the order OpenCV draws in
     Instrument("Violin",  (250, 150, 150), _violin,  0.24, sustains=True),   # periwinkle
     Instrument("Kalimba", (190, 240, 150), _kalimba, 0.49),                  # mint
     Instrument("Bells",   (225, 170, 245), _bell,    0.45, sustains=True),   # violet
-    Instrument("Synth",   (255, 200, 130), _synth,   0.25, sustains=True),   # sky
+    Instrument("Synth",   (255, 200, 130), _synth,   0.31, sustains=True),   # sky
+    Instrument("Glass",   (255, 235, 190), _glass,   0.34, sustains=True),   # ice
 ]
 
 

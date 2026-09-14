@@ -344,7 +344,7 @@ const INSTRUMENTS = [
   // chosen by ear. The curve is not a smooth 1/n**p: the third partial sits
   // well below the fourth, and that dip is a good part of why it reads as
   // breathy rather than as a stack of sines.
-  { name: "Synth", gain: 0.25, sustains: true,
+  { name: "Synth", gain: 0.31, sustains: true,
     make: (f, a, b) => {
       const P = [1.0, 0.54, 0.125, 0.246, 0.11, 0.105, 0.023, 0.033];
       const half = 0.004 * 0.5, ratios = [], gains = [], t60 = [];
@@ -355,6 +355,21 @@ const INSTRUMENTS = [
           t60.push(9);                       // unused: sustain holds it flat
         }
       return new Additive(f, a, ratios, gains, t60, 0.20, 0, 1.0, 1.3, 0.22, 0.17, 9.5);
+    } },
+  // Where the synth imitates a particular keyboard, this is simply the
+  // gentlest thing the engine can make: six partials falling away hard, a
+  // slow swell, and a rolloff that drifts while the note is held. Under one
+  // per cent of its energy sits above 2 kHz, against a third for a sawtooth.
+  { name: "Glass", gain: 0.34, sustains: true,
+    make: (f, a, b) => {
+      const half = 0.004 * 0.5, ratios = [], gains = [], t60 = [];
+      for (const side of [1 - half, 1 + half])
+        for (let n = 1; n <= 6; n++) {
+          ratios.push(n * side);
+          gains.push(0.5 * Math.pow(n, -(2.6 - 0.5 * b)));
+          t60.push(9);                       // unused: sustain holds it flat
+        }
+      return new Additive(f, a, ratios, gains, t60, 0.18, 0, 1.0, 1.3, 0.30, 0.17);
     } },
 ];
 

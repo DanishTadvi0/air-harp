@@ -57,7 +57,7 @@ def test_every_instrument_eventually_frees_its_voices(index, inst, engine):
 def test_the_required_three_are_all_here():
     names = [i.name for i in INSTRUMENTS]
     assert {"Piano", "Violin", "Guitar"} <= set(names)
-    assert len(names) == len(set(names)) == 7
+    assert len(names) == len(set(names)) == 8
 
 
 def test_both_kinds_of_instrument_exist():

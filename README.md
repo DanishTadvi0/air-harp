@@ -29,15 +29,16 @@ All seven shapes are drawn along the foot of the screen the whole time you play.
 | slide the playing hand across | right is full, left fades, far left is silence |
 | raise / lower a hand | brighter / warmer |
 | close to a fist | stop |
-| `1`–`7` | harp, guitar, piano, violin, kalimba, bells, synth |
+| `1`–`8` | harp, guitar, piano, violin, kalimba, bells, synth, glass |
 | `[` `]` | change key · `m` major/minor · `d` stats · `q` quit |
 
 Every chord is built by stacking thirds inside the key, so no combination of
 fingers can produce a note that does not belong. There is no wrong note to hit,
 which is what lets the thing be played rather than learned.
 
-Three of the seven instruments ring out on their own (harp, guitar, kalimba)
-and four hold for as long as you hold the shape (piano, violin, bells, synth).
+Three of the eight instruments ring out on their own (harp, guitar, kalimba)
+and five hold for as long as you hold the shape (piano, violin, bells, synth,
+glass).
 The screen says which.
 
 The synth is the odd one out: it has no decay whatsoever, so a chord stays
@@ -157,7 +158,7 @@ instrument, late input is worse than missing input.
 
 ### Making the sound
 
-Seven instruments, all synthesised — no samples.
+Eight instruments, all synthesised — no samples.
 
 - **Harp and guitar** are Karplus–Strong. The loop filter reads only taps
   written a full lap earlier, so a block can be processed in chunks no longer
@@ -179,6 +180,9 @@ Seven instruments, all synthesised — no samples.
   1.95, pitch wander 9.0 cents rms against 9.5. Its rolloff also drifts slowly
   while a note is held, which is what a filter opening and closing does, and is
   most of what the ear hears as alive rather than switched on.
+- **Glass** is the same idea as the synth but tuned for gentleness rather
+  than for imitation: six partials falling away hard, under one per cent of
+  its energy above 2 kHz against a third for a sawtooth.
 - **Reverb** is Schroeder — four combs and two allpasses, vectorised the same
   way as the string.
 
