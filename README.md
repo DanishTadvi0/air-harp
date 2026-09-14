@@ -161,8 +161,12 @@ Seven instruments, all synthesised — no samples.
   costs nothing at render time. A naive saw at 1.5 kHz folds its upper
   harmonics back into the audible range; a test asserts the energy below the
   fundamental stays under −30 dB.
-- **Synth** is the same band-limited table held flat, with a second detuned
-  oscillator for warmth and no decay at all.
+- **Synth** is six partials falling away steeply, held flat with no decay. A
+  sawtooth carries every harmonic at 1/n, and that brightness is what made the
+  first attempt sound like a buzzer: 32% of its energy sat above 2 kHz against
+  0.7% now. Its rolloff also drifts slowly while a note is held, which is what
+  a filter opening and closing does, and is most of what the ear hears as alive
+  rather than switched on.
 - **Reverb** is Schroeder — four combs and two allpasses, vectorised the same
   way as the string.
 
@@ -211,7 +215,7 @@ docs/
   index.html    the browser build, served by GitHub Pages
   app.js        camera, tracking, chords, canvas HUD
   synth.js      the synthesis engine as an AudioWorklet
-tests/          170 tests
+tests/          175 tests
 ```
 
 2,000 lines across the six Python modules that make up the instrument, 350 more
@@ -224,7 +228,7 @@ browser build.
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-170 tests, no camera and no audio device needed — hands are synthesised as
+175 tests, no camera and no audio device needed — hands are synthesised as
 21-landmark skeletons with real finger curl, and the whole frame loop is driven
 through a `step()` that takes a frame and returns a canvas.
 

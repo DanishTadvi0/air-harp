@@ -444,8 +444,12 @@ def test_following_the_hand_at_one_height_does_not_move_the_level(index, inst):
             for _ in range(30):                 # a second of frames at 30 fps
                 eng.set_level("h", 0.7, 0.6)    # same height as the chord
                 eng.render_block()
-        buf = render(eng, 1.5)
-        return float(np.sqrt((buf[-SR // 4:] ** 2).mean()))
+        # Long enough to average out what is deliberately moving -- the
+        # detune beating and the synth's slow spectral drift both swing the
+        # instantaneous level by several dB on purpose, and a short window
+        # cannot tell that apart from the gain fault this test exists to catch.
+        buf = render(eng, 6.0)
+        return float(np.sqrt((buf[-int(SR * 4.5):] ** 2).mean()))
 
     alone, followed = run(False), run(True)
     ratio = followed / max(alone, 1e-9)
@@ -481,6 +485,22 @@ def test_a_quiet_note_is_quiet_because_of_its_gain_not_its_partials():
     assert loud.gain == pytest.approx(1.0)
 
 
+def test_the_synth_moves_without_drifting_off_level():
+    """Its warmth comes from two detuned copies beating and a rolloff that
+    swings slowly. Both should colour the sound without walking the level
+    somewhere else over time."""
+    index = [i for i, x in enumerate(INSTRUMENTS) if x.name == "Synth"][0]
+    eng = Engine(silent=True, reverb=False)
+    eng.set_instrument(index)
+    eng.set_chord("h", CHORD, 0.7, 0.6, 0.6)
+    buf = render(eng, 16.0)
+
+    win = int(SR * 3.0)
+    blocks = [float(np.sqrt((buf[i:i + win] ** 2).mean()))
+              for i in range(SR, len(buf) - win, win)]
+    assert max(blocks) / min(blocks) < 1.35, f"level wanders: {blocks}"
+
+
 def test_the_synth_does_not_decay_at_all():
     """Every other instrument models something struck or bowed and dies away.
     The synth is the one where not dying is the point: hold the shape and the
@@ -489,16 +509,15 @@ def test_the_synth_does_not_decay_at_all():
     eng = Engine(silent=True, reverb=False)
     eng.set_instrument(index)
     eng.set_chord("h", CHORD, 0.7, 0.6, 0.6)
+    buf = render(eng, 14.0)
 
-    levels, done = [], 0.0
-    for mark in (0.5, 8.0):
-        eng.render_block()
-        buf = render(eng, mark - done)
-        done = mark
-        levels.append(float(np.sqrt((buf[-SR // 4:] ** 2).mean())))
-
-    fall = 20 * np.log10(max(levels[1], 1e-9) / max(levels[0], 1e-9))
-    assert abs(fall) < 2.0, f"drifted {fall:+.1f} dB over eight seconds"
+    # Three-second windows: long enough that the detune beating and the slow
+    # rolloff swing average out, leaving only a genuine decay if there is one.
+    win = int(SR * 3.0)
+    early = float(np.sqrt((buf[SR:SR + win] ** 2).mean()))
+    late = float(np.sqrt((buf[-win:] ** 2).mean()))
+    fall = 20 * np.log10(max(late, 1e-9) / max(early, 1e-9))
+    assert abs(fall) < 2.0, f"drifted {fall:+.1f} dB over ten seconds"
 
 
 def test_the_piano_still_decays_because_it_is_a_piano():

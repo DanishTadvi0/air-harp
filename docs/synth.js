@@ -36,7 +36,7 @@ for (let i = 0; i < TN; i++) SINE[i] = Math.sin((2 * Math.PI * i) / TN);
 const SAW = [];
 (function buildSaw(sr) {
   for (let b = 0; b < BRIGHTS; b++) {
-    const rolloff = 1.35 - 0.2 * b;            // higher b is brighter
+    const rolloff = 2.40 - 0.427 * b;          // higher b is brighter
     const row = [];
     for (let k = 0; k < BANDS; k++) {
       const fMax = BAND_LO * Math.pow(2, k + 1);
@@ -143,11 +143,12 @@ class Plucked extends Voice {
 
 /** Summed partials with per-partial decay: piano, kalimba, bells. */
 class Additive extends Voice {
-  constructor(freq, amp, ratios, gains, t60s, attack, inharm = 0, sustain = 0, release = 0.4) {
+  constructor(freq, amp, ratios, gains, t60s, attack, inharm = 0, sustain = 0,
+              release = 0.4, drift = 0, driftHz = 0.17) {
     // Amplitude belongs to the voice gain, never to the partials. Scaling the
     // partials too would apply it twice the moment anything retargets.
     super(amp);
-    const inc = [], g = [], dec = [], rest = [], phase = [];
+    const inc = [], g = [], dec = [], rest = [], phase = [], harm = [];
     for (let i = 0; i < ratios.length; i++) {
       let r = ratios[i];
       if (inharm) r *= Math.sqrt(1 + inharm * r * r);
@@ -155,12 +156,14 @@ class Additive extends Voice {
       if (f >= sampleRate * 0.46) continue;
       inc.push(f / sampleRate);
       phase.push(Math.random());
+      harm.push(Math.max(r, 1));
       const g0 = gains[i];
       g.push(g0);
       rest.push(g0 * sustain);
       dec.push(Math.pow(10, -3 / (Math.max(t60s[i], 0.02) * sampleRate)));
     }
-    if (!inc.length) { inc.push(freq / sampleRate); phase.push(0); g.push(1); rest.push(0); dec.push(0.9999); }
+    if (!inc.length) { inc.push(freq / sampleRate); phase.push(0); g.push(1);
+                       rest.push(0); dec.push(0.9999); harm.push(1); }
     this.inc = Float64Array.from(inc);
     this.phase = Float64Array.from(phase);
     this.g = Float32Array.from(g);
@@ -171,6 +174,15 @@ class Additive extends Voice {
     this.sustains = sustain > 0;
     this.relLen = Math.max(1, Math.floor(release * sampleRate));
     this.rel = -1;
+    // A spectrum that never moves is most of what the ear hears as
+    // switched-on rather than alive. Swinging the harmonic rolloff slowly is
+    // what a filter opening and closing does. `dmul` is preallocated because
+    // nothing may allocate inside process().
+    this.harm = Float32Array.from(harm);
+    this.drift = drift;
+    this.driftHz = driftHz;
+    this.dphase = Math.random();
+    this.dmul = new Float32Array(this.harm.length).fill(1);
     this.floor = 8e-4;          // on the partial envelope, which is unit-scale
   }
 
@@ -180,12 +192,18 @@ class Additive extends Voice {
   render(out, n) {
     const k = this.inc.length;
     const gain = this.stepGain();
+    if (this.drift) {
+      this.dphase = (this.dphase + (this.driftHz * n) / sampleRate) % 1;
+      const off = -this.drift * Math.sin(2 * Math.PI * this.dphase);
+      for (let p = 0; p < k; p++) this.dmul[p] = Math.pow(this.harm[p], off);
+    }
     for (let p = 0; p < k; p++) {
+      const dm = this.drift ? this.dmul[p] : 1;
       const inc = this.inc[p], dec = this.dec[p], rest = this.rest[p];
       let ph = this.phase[p], g = this.g[p];
       let t = this.t, rel = this.rel;
       for (let s = 0; s < n; s++) {
-        let e = g;
+        let e = g * dm;
         if (t < this.att) e *= t / this.att;
         if (rel >= 0) { const r = Math.max(0, 1 - rel / this.relLen); e *= r * r; rel++; }
         out[s] += SINE[((ph * TN) | 0) & TMASK] * e * gain;
@@ -289,7 +307,7 @@ const INSTRUMENTS = [
       const [n, g, t] = harmonics(8, 1.15 - 0.35 * b, 2.6 + 3.0 * d, 0.72);
       return new Additive(f, a, n, g, t.map((x) => x * tilt(f, 0.22)), 0.004, 0.00028, 0.55, 1.4);
     } },
-  { name: "Violin", gain: 0.24, sustains: true,
+  { name: "Violin", gain: 0.12, sustains: true,
     make: (f, a, b) => new Bowed(f, a, 0.25 + 0.75 * b) },
   { name: "Kalimba", gain: 0.49, sustains: false,
     make: (f, a, b, d) => {
@@ -306,12 +324,22 @@ const INSTRUMENTS = [
         .map((x) => x * (2.4 + 4.6 * d) * tilt(f, 0.18));
       return new Additive(f, a, n, g, t, 0.004, 0, 0.38, 0.9);
     } },
-  // A pad that simply holds: no decay at all, so a chord stays exactly as loud
-  // as you left it. Every other instrument models something struck or bowed
-  // and dies away; this is the one where not dying is the point.
-  { name: "Synth", gain: 0.18, sustains: true,
-    make: (f, a, b) => new Bowed(f, a, 0.05 + 0.45 * b,
-      { attack: 0.06, release: 1.3, vibDepth: 0.0016, vibHz: 4.1, detune: 0.004 }) },
+  // A soft pad that holds flat. Six partials falling away steeply, which is
+  // why it is gentle rather than buzzy -- a sawtooth carries every harmonic at
+  // 1/n and that brightness is what made the first attempt sound robotic. The
+  // rolloff drifts slowly while the note is held, and the partials are doubled
+  // a few cents apart so the two copies beat against each other.
+  { name: "Synth", gain: 0.14, sustains: true,
+    make: (f, a, b) => {
+      const det = 0.004, ratios = [], gains = [], t60 = [];
+      for (const side of [1 - det * 0.5, 1 + det * 0.5])
+        for (let n = 1; n <= 6; n++) {
+          ratios.push(n * side);
+          gains.push(0.5 * Math.pow(n, -(2.6 - 0.5 * b)));
+          t60.push(9);                       // unused: sustain holds it flat
+        }
+      return new Additive(f, a, ratios, gains, t60, 0.18, 0, 1.0, 1.3, 0.30, 0.17);
+    } },
 ];
 
 // ---------------------------------------------------------------------------

@@ -52,7 +52,7 @@ def _build_saw_bank():
     phase = 2.0 * np.pi * np.arange(_TN) / _TN
     bank = []
     for b in range(_BRIGHTS):
-        rolloff = 1.35 - 0.16 * b          # 1/n**rolloff: higher b is brighter
+        rolloff = 2.40 - 0.32 * b          # 1/n**rolloff: higher b is brighter
         rows = []
         for k in range(_BANDS):
             f_max = _BAND_LO * (2.0 ** (k + 1))
@@ -207,7 +207,7 @@ class Additive(Voice):
     """
 
     def __init__(self, freq, amp, ratios, gains, taus, attack, inharm=0.0,
-                 delay=0, sustain=0.0, release=0.4):
+                 delay=0, sustain=0.0, release=0.4, drift=0.0, drift_hz=0.17):
         # Amplitude belongs to the voice gain, never to the partials. Scaling
         # the partials too would apply it twice the moment anything retargets.
         super().__init__(delay, gain=amp)
@@ -227,6 +227,13 @@ class Additive(Voice):
         self.dec = np.power(10.0, -3.0 / (t60 * SR)).astype(np.float32)
         self.att = max(1, int(attack * SR))
         self.t = 0
+        # A spectrum that never moves is most of what the ear hears as
+        # switched-on rather than alive. Swinging the harmonic rolloff slowly
+        # is what a filter opening and closing does, evaluated once a block.
+        self.harm = np.maximum(r[keep], 1.0)
+        self.drift = float(drift)
+        self.drift_hz = float(drift_hz)
+        self.dphase = float(_rng.random())
         self.floor = 8e-4          # on the partial envelope, which is unit-scale
         self.rest = (self.g * float(sustain)).astype(np.float32)
         self.sustains = sustain > 0.0
@@ -248,6 +255,12 @@ class Additive(Voice):
         dec = self.dec ** n
         g1 = (self.rest + (g0 - self.rest) * dec).astype(np.float32)
         env = g0[:, None] + (g1 - g0)[:, None] * _RAMP[None, :n]
+        if self.drift:
+            nxt = self.dphase + self.drift_hz * n / SR
+            m0 = self.harm ** (-self.drift * np.sin(2.0 * np.pi * self.dphase))
+            m1 = self.harm ** (-self.drift * np.sin(2.0 * np.pi * nxt))
+            env = env * (m0[:, None] + (m1 - m0)[:, None] * _RAMP[None, :n])
+            self.dphase = float(nxt % 1.0)
         ph = self.phase[:, None] + self.inc[:, None] * t[None, :]
         idx = (ph * _TN).astype(np.int32) & _TMASK
         y = np.einsum('ij,ij->j', _SINE[idx], env)
@@ -428,25 +441,32 @@ def _bell(freq, amp, bright, damp, delay):
 # renders one note per instrument across three octaves and reports the trim
 # needed to bring each to the same one-second RMS.
 def _synth(freq, amp, bright, damp, delay):
-    """A pad that simply holds: no decay at all, so a chord stays exactly as
-    loud as you left it until you change shape or drop your hand.
+    """A soft pad that simply holds: no decay at all, so a chord stays exactly
+    as loud as you left it until you change shape or drop your hand.
 
-    Every other instrument here models something struck or bowed and therefore
-    dies away. This one is the odd case where not dying is the point.
+    Six partials falling away steeply, which is why it is gentle rather than
+    buzzy -- a sawtooth carries every harmonic at 1/n and that brightness is
+    the whole of what made the first attempt sound robotic. The rolloff then
+    drifts slowly while the note is held, and the partials are doubled a few
+    cents apart so the two copies beat against each other.
     """
-    return Bowed(freq, amp, 0.05 + 0.45 * bright, damp, delay,
-                 attack=0.06, release=1.3,
-                 vib_depth=0.0016, vib_hz=4.1, detune=0.004)
+    n = np.arange(1, 7, dtype=np.float64)
+    det = 0.004
+    ratios = np.concatenate([n * (1.0 - det * 0.5), n * (1.0 + det * 0.5)])
+    gains = np.tile(1.0 / n ** (2.6 - 0.5 * bright), 2) * 0.5
+    t60 = np.full(ratios.shape, 9.0)       # unused: sustain holds it flat
+    return Additive(freq, amp, ratios, gains, t60, 0.18, delay=delay,
+                    sustain=1.0, release=1.3, drift=0.30, drift_hz=0.17)
 
 
 INSTRUMENTS = [                 # colours are BGR, the order OpenCV draws in
     Instrument("Harp",    (130, 205, 245), _harp,    1.46),                  # gold
     Instrument("Guitar",  (80, 140, 230), _guitar,  1.21),                   # copper
     Instrument("Piano",   (250, 235, 225), _piano,   0.19, sustains=True),   # cool white
-    Instrument("Violin",  (250, 150, 150), _violin,  0.24, sustains=True),   # periwinkle
+    Instrument("Violin",  (250, 150, 150), _violin,  0.12, sustains=True),   # periwinkle
     Instrument("Kalimba", (190, 240, 150), _kalimba, 0.49),                  # mint
     Instrument("Bells",   (225, 170, 245), _bell,    0.21, sustains=True),   # violet
-    Instrument("Synth",   (255, 200, 130), _synth,   0.18, sustains=True),   # sky
+    Instrument("Synth",   (255, 200, 130), _synth,   0.14, sustains=True),   # sky
 ]
 
 
